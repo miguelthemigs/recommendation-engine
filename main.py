@@ -14,6 +14,7 @@ Then visit: http://localhost:8000/docs
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from core.store import store
 from api.routes import router
 
@@ -23,10 +24,13 @@ async def lifespan(app: FastAPI):
     # ── Step 1: load cached data into memory ──────────────────────────────────
     store.load()
 
-    # ── Step 3 (TODO): build similarity graph ─────────────────────────────────
-    # Uncomment once core/similarity.py and core/graph.py are implemented:
-    # from core.graph import graph
-    # graph.build(store.all_items())
+    # ── Step 3: build similarity graph (Jaccard) ──────────────────────────────
+    from core.graph import graph
+    graph.build(store.all_items())
+
+    # ── TF-IDF index (overview cosine similarity) ──────────────────────────────
+    from core.tfidf import tfidf_index
+    tfidf_index.build(store.all_items())
 
     yield
 
@@ -35,16 +39,17 @@ app = FastAPI(
     title="TV/Movie Recommendation Engine",
     description="""
 Graph-based recommendation engine for movies and TV shows.
-
-**Steps:**
-- ✅ Step 1 — Data ingestion & local cache (current)
-- 🔲 Step 2 — Similarity scoring (Jaccard)
-- 🔲 Step 3 — Graph building (adjacency list)
-- 🔲 Step 4 — Watchlist recommendations
-- 🔲 Step 5 — Performance analysis
 """,
     version="0.1.0",
     lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost:5174"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
 )
 
 app.include_router(router)

@@ -5,9 +5,12 @@ All HTTP route handlers. Each handler is a thin layer — no business logic here
 Logic lives in core/store.py, core/graph.py, core/similarity.py.
 """
 
+import time
+
 from fastapi import APIRouter, HTTPException, Query
 from core.store import store
 from core.graph import graph
+from core.tfidf import tfidf_index
 from config import DEFAULT_TOP_K
 
 router = APIRouter()
@@ -87,37 +90,126 @@ def search(
     return {"query": q, "type": type, "count": len(results), "results": results}
 
 
-# ── Recommendations (active after Step 3) ─────────────────────────────────────
+# ── Recommendations ────────────────────────────────────────────────────────────
+
+def _resolve_neighbors(
+    neighbors: list[tuple[str, float]],
+) -> list[dict]:
+    results = []
+    for neighbor_id, score in neighbors:
+        neighbor = store.get_item(int(neighbor_id))
+        if neighbor:
+            results.append({**neighbor, "similarity_score": round(score, 4)})
+    return results
+
+
+@router.get(
+    "/recommend/jaccard/{tmdb_id}",
+    summary="Top-K recommendations — Jaccard similarity (genres/keywords/cast)",
+    tags=["recommendations"],
+)
+def recommend_jaccard(
+    tmdb_id: int,
+    k: int = Query(DEFAULT_TOP_K, ge=1, le=50),
+):
+    item = store.get_item(tmdb_id)
+    if not item:
+        raise HTTPException(status_code=404, detail=f"Item {tmdb_id} not found.")
+
+    t0        = time.perf_counter()
+    neighbors = graph.neighbors(str(tmdb_id), top_k=k)
+    query_ms  = round((time.perf_counter() - t0) * 1000, 3)
+
+    return {
+        "algorithm":       "jaccard",
+        "query_time_ms":   query_ms,
+        "item":            item,
+        "recommendations": _resolve_neighbors(neighbors),
+    }
+
+
+@router.get(
+    "/recommend/tfidf/{tmdb_id}",
+    summary="Top-K recommendations — TF-IDF cosine similarity (overview text)",
+    tags=["recommendations"],
+)
+def recommend_tfidf(
+    tmdb_id: int,
+    k: int = Query(DEFAULT_TOP_K, ge=1, le=50),
+):
+    item = store.get_item(tmdb_id)
+    if not item:
+        raise HTTPException(status_code=404, detail=f"Item {tmdb_id} not found.")
+
+    t0        = time.perf_counter()
+    neighbors = tfidf_index.neighbors(str(tmdb_id), top_k=k)
+    query_ms  = round((time.perf_counter() - t0) * 1000, 3)
+
+    return {
+        "algorithm":       "tfidf",
+        "query_time_ms":   query_ms,
+        "item":            item,
+        "recommendations": _resolve_neighbors(neighbors),
+    }
+
+
+@router.get(
+    "/recommend/compare/{tmdb_id}",
+    summary="Compare Jaccard vs TF-IDF recommendations side by side",
+    tags=["recommendations"],
+)
+def recommend_compare(
+    tmdb_id: int,
+    k: int = Query(DEFAULT_TOP_K, ge=1, le=50),
+):
+    item = store.get_item(tmdb_id)
+    if not item:
+        raise HTTPException(status_code=404, detail=f"Item {tmdb_id} not found.")
+
+    id_str = str(tmdb_id)
+
+    t0              = time.perf_counter()
+    jaccard_nbrs    = graph.neighbors(id_str, top_k=k)
+    jaccard_ms      = round((time.perf_counter() - t0) * 1000, 3)
+
+    t0              = time.perf_counter()
+    tfidf_nbrs      = tfidf_index.neighbors(id_str, top_k=k)
+    tfidf_ms        = round((time.perf_counter() - t0) * 1000, 3)
+
+    jaccard_ids = {nid for nid, _ in jaccard_nbrs}
+    tfidf_ids   = {nid for nid, _ in tfidf_nbrs}
+    overlap_ids = jaccard_ids & tfidf_ids
+
+    return {
+        "item": item,
+        "jaccard": {
+            "algorithm":       "jaccard",
+            "query_time_ms":   jaccard_ms,
+            "recommendations": _resolve_neighbors(jaccard_nbrs),
+        },
+        "tfidf": {
+            "algorithm":       "tfidf",
+            "query_time_ms":   tfidf_ms,
+            "recommendations": _resolve_neighbors(tfidf_nbrs),
+        },
+        "overlap": {
+            "count": len(overlap_ids),
+            "ids":   sorted(overlap_ids),
+        },
+    }
+
 
 @router.get(
     "/recommend/{tmdb_id}",
-    summary="Top-K recommendations for a single item [Step 3]",
+    summary="Top-K recommendations — Jaccard (default)",
     tags=["recommendations"],
 )
 def recommend_single(
     tmdb_id: int,
     k: int = Query(DEFAULT_TOP_K, ge=1, le=50),
 ):
-    """
-    Returns the K most similar items to the given movie/show.
-    Requires the graph to be built (Step 3).
-    """
-    item = store.get_item(tmdb_id)
-    if not item:
-        raise HTTPException(status_code=404, detail=f"Item {tmdb_id} not found.")
-
-    try:
-        neighbors = graph.neighbors(str(tmdb_id), top_k=k)
-    except NotImplementedError:
-        raise HTTPException(status_code=503, detail="Graph not built yet — complete Step 3 first.")
-
-    results = []
-    for neighbor_id, score in neighbors:
-        neighbor = store.get_item(int(neighbor_id))
-        if neighbor:
-            results.append({**neighbor, "similarity_score": score})
-
-    return {"item": item, "recommendations": results}
+    """Alias for /recommend/jaccard/{tmdb_id} — kept for backwards compatibility."""
+    return recommend_jaccard(tmdb_id, k)
 
 
 @router.post(
@@ -129,11 +221,6 @@ def recommend_watchlist(
     tmdb_ids: list[int],
     k: int = Query(DEFAULT_TOP_K, ge=1, le=50),
 ):
-    """
-    Given a list of TMDB IDs, returns aggregated Top-K recommendations.
-    Items appearing as neighbors of multiple watchlist entries are ranked higher.
-    Requires the graph (Step 3) and watchlist aggregation (Step 4).
-    """
     if not tmdb_ids:
         raise HTTPException(status_code=400, detail="Watchlist cannot be empty.")
 
@@ -151,11 +238,14 @@ def recommend_watchlist(
     return {"watchlist_size": len(tmdb_ids), "recommendations": results}
 
 
-# ── Graph stats ────────────────────────────────────────────────────────────────
+# ── Graph / index stats ────────────────────────────────────────────────────────
 
-@router.get("/graph/stats", summary="Graph build statistics [Step 3]", tags=["graph"])
+@router.get("/graph/stats", summary="Build statistics for both indexes", tags=["graph"])
 def graph_stats():
-    return graph.stats()
+    return {
+        "jaccard": graph.stats(),
+        "tfidf":   tfidf_index.stats(),
+    }
 
 
 # ── Dataset stats ──────────────────────────────────────────────────────────────
