@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { fetchStats, fetchGraphStats } from '../api/endpoints';
 import type { StatsResponse, GraphStats } from '../api/types';
+import { useBenchmarkContext } from '../context/BenchmarkContext';
 import { StatCard } from '../components/stats/StatCard';
 import { GraphStatBlock } from '../components/stats/GraphStatBlock';
 import { GenreList } from '../components/stats/GenreList';
@@ -8,6 +9,7 @@ import { Spinner } from '../components/ui/Spinner';
 import { ErrorMessage } from '../components/ui/ErrorMessage';
 
 export function StatsPage() {
+  const { timings } = useBenchmarkContext();
   const [stats, setStats] = useState<StatsResponse | null>(null);
   const [graphStats, setGraphStats] = useState<GraphStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -52,6 +54,33 @@ export function StatsPage() {
         <h2 className="text-lg font-semibold text-text-primary">Graph indexes</h2>
         <GraphStatBlock title="Jaccard similarity" stats={graphStats.jaccard} />
         <GraphStatBlock title="TF-IDF similarity" stats={graphStats.tfidf} />
+      </div>
+
+      <div className="space-y-4">
+        <h2 className="text-lg font-semibold text-text-primary">Watchlist Algorithm Benchmarks</h2>
+        {!timings ? (
+          <p className="text-sm text-text-muted">Run a watchlist comparison to see benchmark results.</p>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <StatCard
+                label="Direct aggregation"
+                value={`${timings.direct_ms?.toFixed(2)} ms`}
+                sub={timings.recorded_at ? `Last run: ${new Date(timings.recorded_at).toLocaleTimeString()}` : undefined}
+              />
+              <StatCard
+                label="BFS depth-2"
+                value={`${timings.bfs_ms?.toFixed(2)} ms`}
+                sub={timings.recorded_at ? `Last run: ${new Date(timings.recorded_at).toLocaleTimeString()}` : undefined}
+              />
+              <StatCard
+                label="Personalized PageRank"
+                value={`${timings.pagerank_ms?.toFixed(2)} ms`}
+                sub={timings.recorded_at ? `Last run: ${new Date(timings.recorded_at).toLocaleTimeString()}` : undefined}
+              />
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

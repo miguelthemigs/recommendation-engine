@@ -51,6 +51,34 @@ export interface WatchlistResponse {
   recommendations: WatchlistRec[];
 }
 
+export interface WatchlistScoredItem extends MediaItem { score: number; }
+export interface WatchlistAlgoResponse {
+  algorithm: 'direct' | 'bfs' | 'pagerank';
+  watchlist_size: number;
+  recommendations: WatchlistScoredItem[];
+  query_time_ms: number;
+}
+export interface WatchlistOverlap {
+  all_three: number;
+  direct_bfs: number;
+  direct_pagerank: number;
+  bfs_pagerank: number;
+  ids_all_three: string[];
+}
+export interface WatchlistCompareResponse {
+  watchlist_size: number;
+  direct: WatchlistAlgoResponse;
+  bfs: WatchlistAlgoResponse;
+  pagerank: WatchlistAlgoResponse;
+  overlap: WatchlistOverlap;
+}
+export interface BenchmarkTimings {
+  direct_ms: number | null;
+  bfs_ms: number | null;
+  pagerank_ms: number | null;
+  recorded_at: string | null;
+}
+
 export interface GraphIndexStats {
   status: string;
   nodes?: number;

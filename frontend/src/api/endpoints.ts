@@ -5,6 +5,8 @@ import type {
   SearchResponse,
   CompareResponse,
   WatchlistResponse,
+  WatchlistAlgoResponse,
+  WatchlistCompareResponse,
   StatsResponse,
   GraphStats,
 } from './types';
@@ -33,6 +35,25 @@ export const fetchWatchlistRecs = (ids: number[], k = 10) =>
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(ids),
   });
+
+const watchlistPost = <T>(path: string, ids: number[], k = 10) =>
+  apiFetch<T>(`${path}?k=${k}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(ids),
+  });
+
+export const fetchWatchlistCompare = (ids: number[], k = 10) =>
+  watchlistPost<WatchlistCompareResponse>('/recommend/watchlist/compare', ids, k);
+
+export const fetchWatchlistDirect = (ids: number[], k = 10) =>
+  watchlistPost<WatchlistAlgoResponse>('/recommend/watchlist/direct', ids, k);
+
+export const fetchWatchlistBfs = (ids: number[], k = 10) =>
+  watchlistPost<WatchlistAlgoResponse>('/recommend/watchlist/bfs', ids, k);
+
+export const fetchWatchlistPagerank = (ids: number[], k = 10) =>
+  watchlistPost<WatchlistAlgoResponse>('/recommend/watchlist/pagerank', ids, k);
 
 export const fetchStats = () =>
   apiFetch<StatsResponse>('/stats');

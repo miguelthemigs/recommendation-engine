@@ -11,6 +11,9 @@ from fastapi import APIRouter, HTTPException, Query
 from core.store import store
 from core.graph import graph
 from core.tfidf import tfidf_index
+from core.watchlist_direct import recommend_direct
+from core.watchlist_bfs import recommend_bfs
+from core.watchlist_pagerank import recommend_pagerank
 from config import DEFAULT_TOP_K
 
 router = APIRouter()
@@ -212,9 +215,18 @@ def recommend_single(
     return recommend_jaccard(tmdb_id, k)
 
 
+def _resolve_watchlist_neighbors(ranked: list[tuple[str, float]]) -> list[dict]:
+    results = []
+    for item_id, score in ranked:
+        item = store.get_item(int(item_id))
+        if item:
+            results.append({**item, "score": round(score, 6)})
+    return results
+
+
 @router.post(
     "/recommend/watchlist",
-    summary="Top-K recommendations for a watchlist [Step 4]",
+    summary="Top-K recommendations for a watchlist — direct aggregation (backwards compat)",
     tags=["recommendations"],
 )
 def recommend_watchlist(
@@ -224,10 +236,7 @@ def recommend_watchlist(
     if not tmdb_ids:
         raise HTTPException(status_code=400, detail="Watchlist cannot be empty.")
 
-    try:
-        ranked = graph.neighbors_for_watchlist([str(i) for i in tmdb_ids], top_k=k)
-    except NotImplementedError:
-        raise HTTPException(status_code=503, detail="Watchlist recommendations not built yet — complete Step 4 first.")
+    ranked = recommend_direct(graph.adjacency_list, [str(i) for i in tmdb_ids], top_k=k)
 
     results = []
     for neighbor_id, agg_score in ranked:
@@ -236,6 +245,137 @@ def recommend_watchlist(
             results.append({**item, "aggregated_score": round(agg_score, 4)})
 
     return {"watchlist_size": len(tmdb_ids), "recommendations": results}
+
+
+@router.post(
+    "/recommend/watchlist/direct",
+    summary="Watchlist recommendations — direct aggregation",
+    tags=["recommendations"],
+)
+def recommend_watchlist_direct(
+    tmdb_ids: list[int],
+    k: int = Query(DEFAULT_TOP_K, ge=1, le=50),
+):
+    if not tmdb_ids:
+        raise HTTPException(status_code=400, detail="Watchlist cannot be empty.")
+
+    t0     = time.perf_counter()
+    ranked = recommend_direct(graph.adjacency_list, [str(i) for i in tmdb_ids], top_k=k)
+    ms     = round((time.perf_counter() - t0) * 1000, 3)
+
+    return {
+        "algorithm":       "direct",
+        "watchlist_size":  len(tmdb_ids),
+        "recommendations": _resolve_watchlist_neighbors(ranked),
+        "query_time_ms":   ms,
+    }
+
+
+@router.post(
+    "/recommend/watchlist/bfs",
+    summary="Watchlist recommendations — BFS depth-2",
+    tags=["recommendations"],
+)
+def recommend_watchlist_bfs(
+    tmdb_ids: list[int],
+    k: int = Query(DEFAULT_TOP_K, ge=1, le=50),
+):
+    if not tmdb_ids:
+        raise HTTPException(status_code=400, detail="Watchlist cannot be empty.")
+
+    t0     = time.perf_counter()
+    ranked = recommend_bfs(graph.adjacency_list, [str(i) for i in tmdb_ids], top_k=k)
+    ms     = round((time.perf_counter() - t0) * 1000, 3)
+
+    return {
+        "algorithm":       "bfs",
+        "watchlist_size":  len(tmdb_ids),
+        "recommendations": _resolve_watchlist_neighbors(ranked),
+        "query_time_ms":   ms,
+    }
+
+
+@router.post(
+    "/recommend/watchlist/pagerank",
+    summary="Watchlist recommendations — Personalized PageRank",
+    tags=["recommendations"],
+)
+def recommend_watchlist_pagerank(
+    tmdb_ids: list[int],
+    k: int = Query(DEFAULT_TOP_K, ge=1, le=50),
+):
+    if not tmdb_ids:
+        raise HTTPException(status_code=400, detail="Watchlist cannot be empty.")
+
+    t0     = time.perf_counter()
+    ranked = recommend_pagerank(graph.adjacency_list, [str(i) for i in tmdb_ids], top_k=k)
+    ms     = round((time.perf_counter() - t0) * 1000, 3)
+
+    return {
+        "algorithm":       "pagerank",
+        "watchlist_size":  len(tmdb_ids),
+        "recommendations": _resolve_watchlist_neighbors(ranked),
+        "query_time_ms":   ms,
+    }
+
+
+@router.post(
+    "/recommend/watchlist/compare",
+    summary="Compare all three watchlist algorithms side by side",
+    tags=["recommendations"],
+)
+def recommend_watchlist_compare(
+    tmdb_ids: list[int],
+    k: int = Query(DEFAULT_TOP_K, ge=1, le=50),
+):
+    if not tmdb_ids:
+        raise HTTPException(status_code=400, detail="Watchlist cannot be empty.")
+
+    adj  = graph.adjacency_list
+    ids  = [str(i) for i in tmdb_ids]
+
+    t0         = time.perf_counter()
+    direct_r   = recommend_direct(adj, ids, top_k=k)
+    direct_ms  = round((time.perf_counter() - t0) * 1000, 3)
+
+    t0         = time.perf_counter()
+    bfs_r      = recommend_bfs(adj, ids, top_k=k)
+    bfs_ms     = round((time.perf_counter() - t0) * 1000, 3)
+
+    t0         = time.perf_counter()
+    pr_r       = recommend_pagerank(adj, ids, top_k=k)
+    pr_ms      = round((time.perf_counter() - t0) * 1000, 3)
+
+    direct_ids  = {r[0] for r in direct_r}
+    bfs_ids     = {r[0] for r in bfs_r}
+    pr_ids      = {r[0] for r in pr_r}
+    all_three   = direct_ids & bfs_ids & pr_ids
+
+    return {
+        "watchlist_size": len(tmdb_ids),
+        "direct": {
+            "algorithm":       "direct",
+            "query_time_ms":   direct_ms,
+            "recommendations": _resolve_watchlist_neighbors(direct_r),
+        },
+        "bfs": {
+            "algorithm":       "bfs",
+            "query_time_ms":   bfs_ms,
+            "recommendations": _resolve_watchlist_neighbors(bfs_r),
+        },
+        "pagerank": {
+            "algorithm":       "pagerank",
+            "query_time_ms":   pr_ms,
+            "recommendations": _resolve_watchlist_neighbors(pr_r),
+        },
+        "overlap": {
+            "all_three":       len(all_three),
+            "direct_bfs":      len(direct_ids & bfs_ids),
+            "direct_pagerank": len(direct_ids & pr_ids),
+            "bfs_pagerank":    len(bfs_ids & pr_ids),
+            "ids_all_three":   sorted(all_three),
+        },
+    }
 
 
 # ── Graph / index stats ────────────────────────────────────────────────────────

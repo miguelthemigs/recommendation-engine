@@ -72,28 +72,16 @@ class SimilarityGraph:
             f"{self._node_count} nodes, {self._edge_count} edges"
         )
 
+    @property
+    def adjacency_list(self) -> dict[str, list[tuple[str, float]]]:
+        return self._adjacency_list
+
     def neighbors(self, item_id: str, top_k: int = DEFAULT_TOP_K) -> list[tuple[str, float]]:
         """
         Return top-K neighbors for a single item.
         Returns: [(neighbor_id, score), ...] sorted desc
         """
         return self._adjacency_list.get(item_id, [])[:top_k]
-
-    def neighbors_for_watchlist(
-        self,
-        item_ids: list[str],
-        top_k: int = DEFAULT_TOP_K,
-        exclude_watchlist: bool = True,
-    ) -> list[tuple[str, float]]:
-        """
-        TODO (Step 4): Aggregate neighbor scores across a watchlist.
-
-        Strategy: sum scores across all watchlist items.
-        Items appearing as neighbor of multiple watchlist entries get boosted.
-        Returns top-K items not already in the watchlist.
-        """
-        # PLACEHOLDER
-        raise NotImplementedError("Implement neighbors_for_watchlist() in Step 4")
 
     def stats(self) -> dict:
         """Returns graph build stats — useful for your performance analysis."""

@@ -29,3 +29,9 @@ WEIGHT_CAST    = 0.20
 # ── Graph / Recommendations ────────────────────────────────────────────────────
 DEFAULT_TOP_K       = 10
 MAX_GRAPH_NEIGHBORS = 20
+
+# ── Watchlist Algorithms ────────────────────────────────────────────────────
+BFS_DECAY_FACTOR    = 0.5     # score multiplier for depth-2 neighbors in BFS
+PAGERANK_DAMPING    = 0.85    # standard damping factor for random walk
+PAGERANK_ITERATIONS = 20      # max iterations before forced stop
+PAGERANK_EPSILON    = 1e-6    # convergence threshold (max delta per step)
