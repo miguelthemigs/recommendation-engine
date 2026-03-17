@@ -68,9 +68,3 @@ rec-engine/
 └── requirements.txt
 ```
 
-## Roadmap
-
-- **Step 2** — Implement `core/similarity.py` (Jaccard on genres, keywords, cast)
-- **Step 3** — Implement `core/graph.py` (O(N²) build, adjacency list, top-K query)
-- **Step 4** — Watchlist aggregation (sum neighbor scores, exclude seen items)
-- **Step 5** — Performance analysis (build time, score distribution, weight tuning)
