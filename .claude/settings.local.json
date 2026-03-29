@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python:*)",
+      "Bash(curl -s http://localhost:8000/stats)",
+      "Read(//c/Users/migro/Desktop/Fontys/s6-projects/rec-engine/=== /**)",
+      "Bash(curl -s \"http://localhost:8000/movies?limit=3\")",
+      "Bash(curl -s \"http://localhost:8000/search?q=inception\")",
+      "Bash(curl -s \"http://localhost:8000/recommend/jaccard/27205?k=3\")",
+      "Read(//c/Users/migro/Desktop/Fontys/s6-projects/rec-engine/=== /recommend/tfidf/**)",
+      "Bash(curl -s \"http://localhost:8000/recommend/tfidf/27205?k=3\")",
+      "Read(//c/Users/migro/Desktop/Fontys/s6-projects/rec-engine/=== /graph/**)",
+      "Bash(curl -s http://localhost:8000/graph/stats)"
+    ]
+  }
+}

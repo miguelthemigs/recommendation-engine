@@ -35,3 +35,42 @@ BFS_DECAY_FACTOR    = 0.5     # score multiplier for depth-2 neighbors in BFS
 PAGERANK_DAMPING    = 0.85    # standard damping factor for random walk
 PAGERANK_ITERATIONS = 20      # max iterations before forced stop
 PAGERANK_EPSILON    = 1e-6    # convergence threshold (max delta per step)
+
+# ── Cold Start ───────────────────────────────────────────────────────────────
+OPENAI_API_KEY    = os.getenv("OPENAI_API_KEY", "")
+COLDSTART_MODEL      = "gpt-4o-mini"
+COLDSTART_MAX_TOKENS = 512
+COLDSTART_SEED_COUNT = 5     # seed IDs fed into BFS
+COLDSTART_SEARCH_LIMIT = 3   # store.search results taken per query
+
+COLDSTART_QUESTIONS: list[str] = [
+    "Do you prefer movies, TV shows, or both?",
+    "Which genres interest you? (e.g. Action, Drama, Comedy, Thriller, Horror, Sci-Fi)",
+    "Name a title you've enjoyed recently — doesn't have to be in our database.",
+    "How do you feel about dark or intense content? (fine with it / prefer lighter / no preference)",
+    "Are you looking for something familiar or something you've never seen before?",
+]
+
+COLDSTART_PROMPT_V1 = """You are a recommendation assistant. A user answered 5 onboarding questions.
+Extract structured taste signals from their answers.
+
+Q1 (movie/show/both): {q1}
+Q2 (genres):          {q2}
+Q3 (reference title): {q3}
+Q4 (dark content):    {q4}
+Q5 (familiar/new):    {q5}
+
+Respond with ONLY valid JSON in this exact shape (no markdown, no explanation):
+{{
+  "genres":           ["<genre>", ...],
+  "keywords":         ["<keyword>", ...],
+  "reference_titles": ["<title>", ...],
+  "mood":             "<light | dark | neutral>"
+}}
+
+Rules:
+- genres: 2-5 genre names matching stated and implied preferences
+- keywords: 3-6 thematic keywords implied by genres, title, and mood (e.g. "heist", "found family")
+- reference_titles: the Q3 title plus 1-2 inferred similar titles; keep them recognizable
+- mood: derive from Q4
+- Return nothing outside the JSON object."""

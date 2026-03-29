@@ -8,6 +8,7 @@ Logic lives in core/store.py, core/graph.py, core/similarity.py.
 import time
 
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 from core.store import store
 from core.graph import graph
 from core.tfidf import tfidf_index
@@ -375,6 +376,55 @@ def recommend_watchlist_compare(
             "bfs_pagerank":    len(bfs_ids & pr_ids),
             "ids_all_three":   sorted(all_three),
         },
+    }
+
+
+# ── Cold Start ────────────────────────────────────────────────────────────────
+
+class ColdStartRequest(BaseModel):
+    q1_media_type: str
+    q2_genres:     str
+    q3_title:      str
+    q4_dark:       str
+    q5_familiar:   str
+    k: int = DEFAULT_TOP_K
+
+
+@router.post(
+    "/recommend/coldstart",
+    summary="Cold-start recommendations — LLM taste extraction + BFS",
+    tags=["recommendations"],
+)
+def recommend_coldstart(body: ColdStartRequest) -> dict:
+    from core.coldstart import get_coldstart_recommendations, UserAnswers
+
+    t0      = time.perf_counter()
+    answers = UserAnswers(
+        q1_media_type=body.q1_media_type,
+        q2_genres=body.q2_genres,
+        q3_title=body.q3_title,
+        q4_dark=body.q4_dark,
+        q5_familiar=body.q5_familiar,
+    )
+    result   = get_coldstart_recommendations(answers, top_k=body.k)
+    query_ms = round((time.perf_counter() - t0) * 1000, 3)
+
+    return {
+        "algorithm":     "coldstart_bfs",
+        "query_time_ms": query_ms,
+        "llm_time_ms":   result.llm_time_ms,
+        "seed_ids":      result.seed_ids,
+        "signals": {
+            "genres":           result.signals.genres,
+            "keywords":         result.signals.keywords,
+            "reference_titles": result.signals.reference_titles,
+            "mood":             result.signals.mood,
+        },
+        "token_cost": {
+            "input_tokens":  result.input_tokens,
+            "output_tokens": result.output_tokens,
+        },
+        "recommendations": _resolve_watchlist_neighbors(result.recommendations),
     }
 
 
