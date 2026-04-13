@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { fetchStats, fetchGraphStats } from '../api/endpoints';
 import type { StatsResponse, GraphStats } from '../api/types';
 import { useBenchmarkContext } from '../context/BenchmarkContext';
+import { useColdStartContext } from '../context/ColdStartContext';
 import { StatCard } from '../components/stats/StatCard';
 import { GraphStatBlock } from '../components/stats/GraphStatBlock';
 import { GenreList } from '../components/stats/GenreList';
@@ -10,6 +11,7 @@ import { ErrorMessage } from '../components/ui/ErrorMessage';
 
 export function StatsPage() {
   const { timings } = useBenchmarkContext();
+  const { lastResult: cs } = useColdStartContext();
   const [stats, setStats] = useState<StatsResponse | null>(null);
   const [graphStats, setGraphStats] = useState<GraphStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -54,6 +56,20 @@ export function StatsPage() {
         <h2 className="text-lg font-semibold text-text-primary">Graph indexes</h2>
         <GraphStatBlock title="Jaccard similarity" stats={graphStats.jaccard} />
         <GraphStatBlock title="TF-IDF similarity" stats={graphStats.tfidf} />
+      </div>
+
+      <div className="space-y-4">
+        <h2 className="text-lg font-semibold text-text-primary">Cold-Start (Discover)</h2>
+        {!cs ? (
+          <p className="text-sm text-text-muted">Run a Discover session to see cold-start stats.</p>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <StatCard label="LLM time" value={`${cs.llm_time_ms.toFixed(0)} ms`} />
+            <StatCard label="Query time" value={`${cs.query_time_ms.toFixed(1)} ms`} />
+            <StatCard label="Input tokens" value={cs.token_cost.input_tokens.toLocaleString()} />
+            <StatCard label="Output tokens" value={cs.token_cost.output_tokens.toLocaleString()} />
+          </div>
+        )}
       </div>
 
       <div className="space-y-4">

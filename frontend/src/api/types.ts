@@ -98,3 +98,20 @@ export interface StatsResponse {
   movie_genres: Record<string, number>;
   show_genres: Record<string, number>;
 }
+
+export interface TasteSignals {
+  genres: string[];
+  keywords: string[];
+  reference_titles: string[];
+  mood: 'light' | 'dark' | 'neutral';
+}
+
+export interface ColdStartResponse {
+  algorithm: 'coldstart_bfs';
+  query_time_ms: number;
+  llm_time_ms: number;
+  signals: TasteSignals;
+  seeds: MediaItem[];
+  token_cost: { input_tokens: number; output_tokens: number };
+  recommendations: WatchlistScoredItem[];
+}

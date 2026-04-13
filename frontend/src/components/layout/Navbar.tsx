@@ -2,10 +2,11 @@ import { NavLink } from 'react-router-dom';
 import { WatchlistCounter } from '../watchlist/WatchlistCounter';
 
 const links = [
-  { to: '/movies', label: 'Movies' },
-  { to: '/shows',  label: 'Shows' },
-  { to: '/search', label: 'Search' },
-  { to: '/stats',  label: 'Stats' },
+  { to: '/movies',   label: 'Movies' },
+  { to: '/shows',    label: 'Shows' },
+  { to: '/search',   label: 'Search' },
+  { to: '/discover', label: 'Discover' },
+  { to: '/stats',    label: 'Stats' },
 ];
 
 export function Navbar() {

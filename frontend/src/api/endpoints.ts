@@ -9,6 +9,7 @@ import type {
   WatchlistCompareResponse,
   StatsResponse,
   GraphStats,
+  ColdStartResponse,
 } from './types';
 
 export const fetchMovies = (limit: number, offset: number) =>
@@ -60,3 +61,19 @@ export const fetchStats = () =>
 
 export const fetchGraphStats = () =>
   apiFetch<GraphStats>('/graph/stats');
+
+export interface ColdStartRequest {
+  q1_media_type: string;
+  q2_genres: string;
+  q3_title: string;
+  q4_dark: string;
+  q5_familiar: string;
+  k?: number;
+}
+
+export const fetchColdStart = (body: ColdStartRequest) =>
+  apiFetch<ColdStartResponse>('/recommend/coldstart', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });

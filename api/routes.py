@@ -409,17 +409,23 @@ def recommend_coldstart(body: ColdStartRequest) -> dict:
     result   = get_coldstart_recommendations(answers, top_k=body.k)
     query_ms = round((time.perf_counter() - t0) * 1000, 3)
 
+    seed_items = [
+        store.get_item(int(sid))
+        for sid in result.seed_ids
+        if store.get_item(int(sid))
+    ]
+
     return {
         "algorithm":     "coldstart_bfs",
         "query_time_ms": query_ms,
         "llm_time_ms":   result.llm_time_ms,
-        "seed_ids":      result.seed_ids,
         "signals": {
             "genres":           result.signals.genres,
             "keywords":         result.signals.keywords,
             "reference_titles": result.signals.reference_titles,
             "mood":             result.signals.mood,
         },
+        "seeds":       seed_items,
         "token_cost": {
             "input_tokens":  result.input_tokens,
             "output_tokens": result.output_tokens,

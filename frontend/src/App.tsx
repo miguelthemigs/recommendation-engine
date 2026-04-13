@@ -5,6 +5,7 @@ import { SearchPage } from './pages/SearchPage';
 import { ItemDetailPage } from './pages/ItemDetailPage';
 import { WatchlistPage } from './pages/WatchlistPage';
 import { StatsPage } from './pages/StatsPage';
+import { ColdStartPage } from './pages/ColdStartPage';
 
 export function App() {
   return (
@@ -17,6 +18,7 @@ export function App() {
         <Route path="/shows/:id" element={<ItemDetailPage type="show" />} />
         <Route path="/search" element={<SearchPage />} />
         <Route path="/watchlist" element={<WatchlistPage />} />
+        <Route path="/discover" element={<ColdStartPage />} />
         <Route path="/stats" element={<StatsPage />} />
       </Routes>
     </PageShell>

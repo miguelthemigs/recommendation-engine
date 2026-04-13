@@ -17,7 +17,7 @@ GENRES_CACHE = DATA_DIR / "genres.json"
 TMDB_API_KEY  = os.getenv("TMDB_API_KEY", "")
 TMDB_BASE_URL = "https://api.themoviedb.org/3"
 TMDB_LANGUAGE = "en-US"          # explicit — avoids locale-based genre translations
-TMDB_PAGES_TO_FETCH = 10         # 1 page = 20 items → 10 pages = ~200 per type
+TMDB_PAGES_TO_FETCH = 25         # 1 page = 20 items → 25 pages = ~500 per type
 
 TOP_CAST_COUNT = 5               # how many cast members to store per title
 
@@ -71,6 +71,6 @@ Respond with ONLY valid JSON in this exact shape (no markdown, no explanation):
 Rules:
 - genres: 2-5 genre names matching stated and implied preferences
 - keywords: 3-6 thematic keywords implied by genres, title, and mood (e.g. "heist", "found family")
-- reference_titles: the Q3 title plus 1-2 inferred similar titles; keep them recognizable
+- reference_titles: ONLY the exact title(s) the user named in Q3 — do not infer, add, or suggest similar titles
 - mood: derive from Q4
 - Return nothing outside the JSON object."""
