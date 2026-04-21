@@ -56,6 +56,33 @@ export const fetchWatchlistBfs = (ids: number[], k = 10) =>
 export const fetchWatchlistPagerank = (ids: number[], k = 10) =>
   watchlistPost<WatchlistAlgoResponse>('/recommend/watchlist/pagerank', ids, k);
 
+// ── Watchlist CRUD (authenticated) ────────────────────────────────────────────
+
+export interface WatchlistCrudResponse {
+  count: number;
+  items: MediaItem[];
+}
+
+export const fetchUserWatchlist = () =>
+  apiFetch<WatchlistCrudResponse>('/watchlist');
+
+export const addToUserWatchlist = (tmdb_id: number, media_type: 'movie' | 'show') =>
+  apiFetch<{ status: string }>('/watchlist', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tmdb_id, media_type }),
+  });
+
+export const removeFromUserWatchlist = (tmdb_id: number, media_type: 'movie' | 'show') =>
+  apiFetch<{ status: string }>(`/watchlist/${tmdb_id}?media_type=${media_type}`, {
+    method: 'DELETE',
+  });
+
+export const clearUserWatchlist = () =>
+  apiFetch<{ status: string }>('/watchlist', { method: 'DELETE' });
+
+// ── Stats ──────────���───────────────────────��──────────────────────────────────
+
 export const fetchStats = () =>
   apiFetch<StatsResponse>('/stats');
 

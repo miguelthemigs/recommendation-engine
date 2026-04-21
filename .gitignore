@@ -1,5 +1,7 @@
 .env
+frontend/.env
 data/
 __pycache__/
 *.pyc
 CLAUDE.md
+node_modules/

@@ -10,7 +10,18 @@
       "Read(//c/Users/migro/Desktop/Fontys/s6-projects/rec-engine/=== /recommend/tfidf/**)",
       "Bash(curl -s \"http://localhost:8000/recommend/tfidf/27205?k=3\")",
       "Read(//c/Users/migro/Desktop/Fontys/s6-projects/rec-engine/=== /graph/**)",
-      "Bash(curl -s http://localhost:8000/graph/stats)"
+      "Bash(curl -s http://localhost:8000/graph/stats)",
+      "Bash(npm install:*)",
+      "Bash(npx tsc:*)",
+      "Read(//c/Users/migro/.claude/**)",
+      "mcp__supabase__apply_migration",
+      "mcp__supabase__get_project_url",
+      "mcp__supabase__get_publishable_keys",
+      "Bash(pip install *)"
     ]
-  }
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "supabase"
+  ]
 }

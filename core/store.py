@@ -1,19 +1,19 @@
 """
 core/store.py
 ─────────────
-In-memory data store. Loads JSON caches once at startup.
+In-memory data store. Loads from Supabase at startup (falls back to JSON).
 All API requests are served from RAM — zero disk/network I/O per request.
 """
 
 import json
 from pathlib import Path
 from typing import Optional
-from config import MOVIES_CACHE, SHOWS_CACHE, GENRES_CACHE
+from config import MOVIES_CACHE, SHOWS_CACHE, GENRES_CACHE, SUPABASE_URL
 
 
 class MediaStore:
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._movies:       dict[str, dict] = {}
         self._shows:        dict[str, dict] = {}
         self._movie_genres: dict[str, str]  = {}   # { "28": "Action", "18": "Drama", ... }
@@ -22,29 +22,71 @@ class MediaStore:
     # ── Startup ────────────────────────────────────────────────────────────────
 
     def load(self) -> None:
-        """Called once at FastAPI startup. Reads all JSON caches into memory."""
-        self._movies = self._read(MOVIES_CACHE, "movies")
-        self._shows  = self._read(SHOWS_CACHE,  "shows")
-        self._load_genres()
+        """Called once at FastAPI startup. Loads from Supabase if configured, else JSON."""
+        if SUPABASE_URL:
+            self._load_from_supabase()
+        else:
+            self._load_from_json()
         print(f"[store] {len(self._movies)} movies | {len(self._shows)} shows loaded.")
         print(f"[store] {len(self._movie_genres)} movie genres | {len(self._tv_genres)} TV genres loaded.")
 
-    def _load_genres(self) -> None:
-        """
-        Reads genres.json which has the shape:
-            { "movie": { "28": "Action", ... }, "tv": { "10759": "Action & Adventure", ... } }
+    def _load_from_supabase(self) -> None:
+        """Fetch all movies, shows, and genres from Supabase Postgres."""
+        from core.supabase_client import get_supabase
 
-        JSON keys are always strings, so genre IDs are stored as strings — that's fine,
-        it matches how we look them up everywhere else.
-        """
+        client = get_supabase()
+        print("[store] Loading from Supabase...")
+
+        # Movies
+        resp = client.table("movies").select("*").execute()
+        for row in resp.data:
+            item = self._row_to_item(row, "movie")
+            self._movies[str(item["id"])] = item
+
+        # Shows
+        resp = client.table("shows").select("*").execute()
+        for row in resp.data:
+            item = self._row_to_item(row, "show")
+            self._shows[str(item["id"])] = item
+
+        # Genres
+        resp = client.table("genres").select("*").execute()
+        for row in resp.data:
+            if row["category"] == "movie":
+                self._movie_genres[row["tmdb_id"]] = row["name"]
+            elif row["category"] == "tv":
+                self._tv_genres[row["tmdb_id"]] = row["name"]
+
+    @staticmethod
+    def _row_to_item(row: dict, media_type: str) -> dict:
+        """Convert a Supabase row back to the in-memory dict shape."""
+        return {
+            "id":           row["tmdb_id"],
+            "type":         media_type,
+            "title":        row["title"],
+            "year":         row["year"],
+            "overview":     row["overview"],
+            "genres":       row["genres"],
+            "keywords":     row["keywords"],
+            "cast":         row["cast"],
+            "vote_average": row["vote_average"],
+            "popularity":   row["popularity"],
+            "poster_path":  row["poster_path"],
+        }
+
+    def _load_from_json(self) -> None:
+        """Fallback: read JSON caches from disk (local dev without Supabase)."""
+        print("[store] SUPABASE_URL not set — falling back to JSON files.")
+        self._movies = self._read(MOVIES_CACHE, "movies")
+        self._shows  = self._read(SHOWS_CACHE,  "shows")
+        self._load_genres_json()
+
+    def _load_genres_json(self) -> None:
         if not GENRES_CACHE.exists():
             print(f"[store] WARNING: {GENRES_CACHE} missing — run scripts/fetch_tmdb.py")
             return
-
         with open(GENRES_CACHE, encoding="utf-8") as f:
             raw = json.load(f)
-
-        # genres.json stores them under "movie" and "tv" keys
         self._movie_genres = raw.get("movie", {})
         self._tv_genres    = raw.get("tv",    {})
 

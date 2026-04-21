@@ -6,8 +6,9 @@ Logic lives in core/store.py, core/graph.py, core/similarity.py.
 """
 
 import time
+from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel
 from core.store import store
 from core.graph import graph
@@ -16,6 +17,7 @@ from core.watchlist_direct import recommend_direct
 from core.watchlist_bfs import recommend_bfs
 from core.watchlist_pagerank import recommend_pagerank
 from config import DEFAULT_TOP_K
+from api.auth import get_current_user, get_optional_user
 
 router = APIRouter()
 
@@ -225,6 +227,139 @@ def _resolve_watchlist_neighbors(ranked: list[tuple[str, float]]) -> list[dict]:
     return results
 
 
+# ── Watchlist CRUD ─────────────────────────────────────────────────────────────
+
+class WatchlistAddBody(BaseModel):
+    tmdb_id: int
+    media_type: str  # "movie" | "show"
+
+
+@router.get(
+    "/watchlist",
+    summary="Get the authenticated user's watchlist",
+    tags=["watchlist"],
+)
+def get_watchlist(user: dict = Depends(get_current_user)):
+    from core.supabase_client import get_supabase
+    client = get_supabase()
+    user_id = user["sub"]
+
+    resp = client.table("watchlists") \
+        .select("tmdb_id, media_type, added_at") \
+        .eq("user_id", user_id) \
+        .order("added_at", desc=True) \
+        .execute()
+
+    items = []
+    for row in resp.data:
+        tmdb_id = row["tmdb_id"]
+        if row["media_type"] == "movie":
+            item = store.get_movie(tmdb_id)
+        else:
+            item = store.get_show(tmdb_id)
+        if item:
+            items.append({**item, "added_at": row["added_at"]})
+
+    return {"count": len(items), "items": items}
+
+
+@router.post(
+    "/watchlist",
+    summary="Add an item to the authenticated user's watchlist",
+    tags=["watchlist"],
+)
+def add_to_watchlist(body: WatchlistAddBody, user: dict = Depends(get_current_user)):
+    if body.media_type not in ("movie", "show"):
+        raise HTTPException(status_code=400, detail="media_type must be 'movie' or 'show'.")
+
+    # Verify item exists in store
+    if body.media_type == "movie":
+        item = store.get_movie(body.tmdb_id)
+    else:
+        item = store.get_show(body.tmdb_id)
+    if not item:
+        raise HTTPException(status_code=404, detail=f"{body.media_type} {body.tmdb_id} not found.")
+
+    from core.supabase_client import get_supabase
+    client = get_supabase()
+
+    client.table("watchlists").upsert({
+        "user_id":    user["sub"],
+        "tmdb_id":    body.tmdb_id,
+        "media_type": body.media_type,
+    }, on_conflict="user_id,tmdb_id,media_type").execute()
+
+    return {"status": "added", "tmdb_id": body.tmdb_id, "media_type": body.media_type}
+
+
+@router.delete(
+    "/watchlist/{tmdb_id}",
+    summary="Remove an item from the authenticated user's watchlist",
+    tags=["watchlist"],
+)
+def remove_from_watchlist(
+    tmdb_id: int,
+    media_type: str = Query(..., description="movie or show"),
+    user: dict = Depends(get_current_user),
+):
+    if media_type not in ("movie", "show"):
+        raise HTTPException(status_code=400, detail="media_type must be 'movie' or 'show'.")
+
+    from core.supabase_client import get_supabase
+    client = get_supabase()
+
+    client.table("watchlists") \
+        .delete() \
+        .eq("user_id", user["sub"]) \
+        .eq("tmdb_id", tmdb_id) \
+        .eq("media_type", media_type) \
+        .execute()
+
+    return {"status": "removed", "tmdb_id": tmdb_id, "media_type": media_type}
+
+
+@router.delete(
+    "/watchlist",
+    summary="Clear the authenticated user's entire watchlist",
+    tags=["watchlist"],
+)
+def clear_watchlist(user: dict = Depends(get_current_user)):
+    from core.supabase_client import get_supabase
+    client = get_supabase()
+
+    client.table("watchlists") \
+        .delete() \
+        .eq("user_id", user["sub"]) \
+        .execute()
+
+    return {"status": "cleared"}
+
+
+# ── Watchlist Recommendations ──────────────────────────────────────────────────
+
+def _resolve_watchlist_ids(
+    tmdb_ids: Optional[list[int]],
+    user: Optional[dict],
+) -> list[int]:
+    """Get watchlist IDs from body or from DB if user is authenticated + empty body."""
+    if tmdb_ids:
+        return tmdb_ids
+    if not user:
+        raise HTTPException(status_code=400, detail="Watchlist cannot be empty.")
+
+    from core.supabase_client import get_supabase
+    client = get_supabase()
+    resp = client.table("watchlists") \
+        .select("tmdb_id") \
+        .eq("user_id", user["sub"]) \
+        .execute()
+
+    ids = [row["tmdb_id"] for row in resp.data]
+    if not ids:
+        raise HTTPException(status_code=400, detail="Your watchlist is empty.")
+    return ids
+
+
 @router.post(
     "/recommend/watchlist",
     summary="Top-K recommendations for a watchlist — direct aggregation (backwards compat)",
@@ -254,19 +389,19 @@ def recommend_watchlist(
     tags=["recommendations"],
 )
 def recommend_watchlist_direct(
-    tmdb_ids: list[int],
+    tmdb_ids: Optional[list[int]] = None,
     k: int = Query(DEFAULT_TOP_K, ge=1, le=50),
+    user: Optional[dict] = Depends(get_optional_user),
 ):
-    if not tmdb_ids:
-        raise HTTPException(status_code=400, detail="Watchlist cannot be empty.")
+    ids = _resolve_watchlist_ids(tmdb_ids, user)
 
     t0     = time.perf_counter()
-    ranked = recommend_direct(graph.adjacency_list, [str(i) for i in tmdb_ids], top_k=k)
+    ranked = recommend_direct(graph.adjacency_list, [str(i) for i in ids], top_k=k)
     ms     = round((time.perf_counter() - t0) * 1000, 3)
 
     return {
         "algorithm":       "direct",
-        "watchlist_size":  len(tmdb_ids),
+        "watchlist_size":  len(ids),
         "recommendations": _resolve_watchlist_neighbors(ranked),
         "query_time_ms":   ms,
     }
@@ -278,19 +413,19 @@ def recommend_watchlist_direct(
     tags=["recommendations"],
 )
 def recommend_watchlist_bfs(
-    tmdb_ids: list[int],
+    tmdb_ids: Optional[list[int]] = None,
     k: int = Query(DEFAULT_TOP_K, ge=1, le=50),
+    user: Optional[dict] = Depends(get_optional_user),
 ):
-    if not tmdb_ids:
-        raise HTTPException(status_code=400, detail="Watchlist cannot be empty.")
+    ids = _resolve_watchlist_ids(tmdb_ids, user)
 
     t0     = time.perf_counter()
-    ranked = recommend_bfs(graph.adjacency_list, [str(i) for i in tmdb_ids], top_k=k)
+    ranked = recommend_bfs(graph.adjacency_list, [str(i) for i in ids], top_k=k)
     ms     = round((time.perf_counter() - t0) * 1000, 3)
 
     return {
         "algorithm":       "bfs",
-        "watchlist_size":  len(tmdb_ids),
+        "watchlist_size":  len(ids),
         "recommendations": _resolve_watchlist_neighbors(ranked),
         "query_time_ms":   ms,
     }
@@ -302,19 +437,19 @@ def recommend_watchlist_bfs(
     tags=["recommendations"],
 )
 def recommend_watchlist_pagerank(
-    tmdb_ids: list[int],
+    tmdb_ids: Optional[list[int]] = None,
     k: int = Query(DEFAULT_TOP_K, ge=1, le=50),
+    user: Optional[dict] = Depends(get_optional_user),
 ):
-    if not tmdb_ids:
-        raise HTTPException(status_code=400, detail="Watchlist cannot be empty.")
+    ids = _resolve_watchlist_ids(tmdb_ids, user)
 
     t0     = time.perf_counter()
-    ranked = recommend_pagerank(graph.adjacency_list, [str(i) for i in tmdb_ids], top_k=k)
+    ranked = recommend_pagerank(graph.adjacency_list, [str(i) for i in ids], top_k=k)
     ms     = round((time.perf_counter() - t0) * 1000, 3)
 
     return {
         "algorithm":       "pagerank",
-        "watchlist_size":  len(tmdb_ids),
+        "watchlist_size":  len(ids),
         "recommendations": _resolve_watchlist_neighbors(ranked),
         "query_time_ms":   ms,
     }
@@ -326,25 +461,25 @@ def recommend_watchlist_pagerank(
     tags=["recommendations"],
 )
 def recommend_watchlist_compare(
-    tmdb_ids: list[int],
+    tmdb_ids: Optional[list[int]] = None,
     k: int = Query(DEFAULT_TOP_K, ge=1, le=50),
+    user: Optional[dict] = Depends(get_optional_user),
 ):
-    if not tmdb_ids:
-        raise HTTPException(status_code=400, detail="Watchlist cannot be empty.")
+    ids = _resolve_watchlist_ids(tmdb_ids, user)
 
     adj  = graph.adjacency_list
-    ids  = [str(i) for i in tmdb_ids]
+    id_strs = [str(i) for i in ids]
 
     t0         = time.perf_counter()
-    direct_r   = recommend_direct(adj, ids, top_k=k)
+    direct_r   = recommend_direct(adj, id_strs, top_k=k)
     direct_ms  = round((time.perf_counter() - t0) * 1000, 3)
 
     t0         = time.perf_counter()
-    bfs_r      = recommend_bfs(adj, ids, top_k=k)
+    bfs_r      = recommend_bfs(adj, id_strs, top_k=k)
     bfs_ms     = round((time.perf_counter() - t0) * 1000, 3)
 
     t0         = time.perf_counter()
-    pr_r       = recommend_pagerank(adj, ids, top_k=k)
+    pr_r       = recommend_pagerank(adj, id_strs, top_k=k)
     pr_ms      = round((time.perf_counter() - t0) * 1000, 3)
 
     direct_ids  = {r[0] for r in direct_r}
@@ -353,7 +488,7 @@ def recommend_watchlist_compare(
     all_three   = direct_ids & bfs_ids & pr_ids
 
     return {
-        "watchlist_size": len(tmdb_ids),
+        "watchlist_size": len(ids),
         "direct": {
             "algorithm":       "direct",
             "query_time_ms":   direct_ms,
@@ -395,8 +530,12 @@ class ColdStartRequest(BaseModel):
     summary="Cold-start recommendations — LLM taste extraction + BFS",
     tags=["recommendations"],
 )
-def recommend_coldstart(body: ColdStartRequest) -> dict:
+def recommend_coldstart(
+    body: ColdStartRequest,
+    user: Optional[dict] = Depends(get_optional_user),
+) -> dict:
     from core.coldstart import get_coldstart_recommendations, UserAnswers
+    from core.supabase_client import get_supabase
 
     t0      = time.perf_counter()
     answers = UserAnswers(
@@ -406,32 +545,80 @@ def recommend_coldstart(body: ColdStartRequest) -> dict:
         q4_dark=body.q4_dark,
         q5_familiar=body.q5_familiar,
     )
-    result   = get_coldstart_recommendations(answers, top_k=body.k)
-    query_ms = round((time.perf_counter() - t0) * 1000, 3)
 
-    seed_items = [
-        store.get_item(int(sid))
-        for sid in result.seed_ids
-        if store.get_item(int(sid))
-    ]
+    # Create job row if user is authenticated
+    job_id = None
+    if user:
+        client = get_supabase()
+        job_resp = client.table("cold_start_jobs").insert({
+            "user_id": user["sub"],
+            "status": "running",
+            "answers": {
+                "q1_media_type": body.q1_media_type,
+                "q2_genres": body.q2_genres,
+                "q3_title": body.q3_title,
+                "q4_dark": body.q4_dark,
+                "q5_familiar": body.q5_familiar,
+            },
+            "started_at": "now()",
+        }).execute()
+        job_id = job_resp.data[0]["id"] if job_resp.data else None
 
-    return {
-        "algorithm":     "coldstart_bfs",
-        "query_time_ms": query_ms,
-        "llm_time_ms":   result.llm_time_ms,
-        "signals": {
-            "genres":           result.signals.genres,
-            "keywords":         result.signals.keywords,
-            "reference_titles": result.signals.reference_titles,
-            "mood":             result.signals.mood,
-        },
-        "seeds":       seed_items,
-        "token_cost": {
-            "input_tokens":  result.input_tokens,
-            "output_tokens": result.output_tokens,
-        },
-        "recommendations": _resolve_watchlist_neighbors(result.recommendations),
-    }
+    try:
+        result   = get_coldstart_recommendations(answers, top_k=body.k)
+        query_ms = round((time.perf_counter() - t0) * 1000, 3)
+
+        seed_items = [
+            store.get_item(int(sid))
+            for sid in result.seed_ids
+            if store.get_item(int(sid))
+        ]
+
+        response = {
+            "algorithm":     "coldstart_bfs",
+            "query_time_ms": query_ms,
+            "llm_time_ms":   result.llm_time_ms,
+            "signals": {
+                "genres":           result.signals.genres,
+                "keywords":         result.signals.keywords,
+                "reference_titles": result.signals.reference_titles,
+                "mood":             result.signals.mood,
+            },
+            "seeds":       seed_items,
+            "token_cost": {
+                "input_tokens":  result.input_tokens,
+                "output_tokens": result.output_tokens,
+            },
+            "recommendations": _resolve_watchlist_neighbors(result.recommendations),
+        }
+
+        # Update job to completed
+        if job_id:
+            client.table("cold_start_jobs").update({
+                "status": "completed",
+                "signals": response["signals"],
+                "seed_ids": result.seed_ids,
+                "recommendations": [
+                    {"tmdb_id": r["id"], "score": r["score"]}
+                    for r in response["recommendations"]
+                ],
+                "token_cost": response["token_cost"],
+                "llm_time_ms": result.llm_time_ms,
+                "total_time_ms": query_ms,
+                "completed_at": "now()",
+            }).eq("id", job_id).execute()
+
+        return response
+
+    except Exception as e:
+        # Update job to failed
+        if job_id:
+            client.table("cold_start_jobs").update({
+                "status": "failed",
+                "error_message": str(e),
+                "completed_at": "now()",
+            }).eq("id", job_id).execute()
+        raise
 
 
 # ── Graph / index stats ────────────────────────────────────────────────────────

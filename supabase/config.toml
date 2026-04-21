@@ -1,0 +1,6 @@
+[project]
+id = ""  # Fill in after creating Supabase project
+
+[api]
+enabled = true
+port = 54321

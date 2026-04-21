@@ -13,6 +13,12 @@ MOVIES_CACHE = DATA_DIR / "movies.json"
 SHOWS_CACHE  = DATA_DIR / "shows.json"
 GENRES_CACHE = DATA_DIR / "genres.json"
 
+# ── Supabase ───────────────────────────────────────────────────────────────────
+SUPABASE_URL              = os.getenv("SUPABASE_URL", "")
+SUPABASE_ANON_KEY         = os.getenv("SUPABASE_ANON_KEY", "")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+SUPABASE_JWT_SECRET       = os.getenv("SUPABASE_JWT_SECRET", "")
+
 # ── TMDB ───────────────────────────────────────────────────────────────────────
 TMDB_API_KEY  = os.getenv("TMDB_API_KEY", "")
 TMDB_BASE_URL = "https://api.themoviedb.org/3"
