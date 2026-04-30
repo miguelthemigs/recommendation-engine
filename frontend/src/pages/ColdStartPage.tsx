@@ -1,19 +1,30 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { fetchColdStart } from '../api/endpoints';
-import type { ColdStartResponse, MediaItem } from '../api/types';
+import { submitColdStart, fetchJobResult } from '../api/endpoints';
+import {
+  type ColdStartResponse,
+  type MediaItem,
+  isColdStartCompleted,
+} from '../api/types';
 import { useWatchlist } from '../context/WatchlistContext';
 import { useColdStartContext, type ColdStartFormState } from '../context/ColdStartContext';
 import { PosterImage } from '../components/media/PosterImage';
 import { MediaBadge } from '../components/media/MediaBadge';
-import { Spinner } from '../components/ui/Spinner';
 import { releaseYear } from '../lib/utils';
+import { supabase } from '../lib/supabase';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 type DiscoverItem = MediaItem & { score?: number; isSeed: boolean };
 
 type FormState = ColdStartFormState;
+
+type LoadingPhase = 'idle' | 'submitting' | 'processing';
+
+const JOB_STORAGE_KEY = 'coldstart_job_id';
+const REALTIME_FALLBACK_MS = 30_000;
+const POLL_INTERVAL_MS = 3_000;
+const PROCESSING_TIMEOUT_MS = 120_000;
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
@@ -38,6 +49,19 @@ function OptionButton({
     >
       {label}
     </button>
+  );
+}
+
+function PhaseSpinner({ phase }: { phase: Exclude<LoadingPhase, 'idle'> }) {
+  const message =
+    phase === 'submitting'
+      ? 'Sending your answers…'
+      : 'Analyzing your taste with AI…';
+  return (
+    <div className="flex flex-col items-center justify-center py-12 space-y-3">
+      <div className="w-10 h-10 border-4 border-surface-border border-t-accent rounded-full animate-spin" />
+      <p className="text-sm text-text-muted">{message}</p>
+    </div>
   );
 }
 
@@ -139,9 +163,12 @@ export function ColdStartPage() {
   const resultsRef = useRef<HTMLDivElement>(null);
 
   const [form, setForm] = useState<FormState>(savedForm);
-  const [loading, setLoading] = useState(false);
+  const [phase, setPhase] = useState<LoadingPhase>('idle');
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ColdStartResponse | null>(lastResult);
+
+  const cleanupRef = useRef<(() => void) | null>(null);
+  const settledRef = useRef(false);
 
   const set = (key: keyof FormState) => (val: string) =>
     setForm(prev => ({ ...prev, [key]: val }));
@@ -149,7 +176,6 @@ export function ColdStartPage() {
   const combinedByType = (): { movies: DiscoverItem[]; shows: DiscoverItem[] } => {
     if (!result) return { movies: [], shows: [] };
     const seedIds = new Set(result.seeds.map(s => String(s.id)));
-    // Exclude titles the user mentioned (Q3 + any LLM-extracted reference titles)
     const mentioned = [
       form.q3.trim(),
       ...result.signals.reference_titles,
@@ -172,32 +198,154 @@ export function ColdStartPage() {
     };
   };
 
+  // Realtime + polling fallback + hard timeout
+  const attachJobListener = (jobId: string) => {
+    cleanupRef.current?.();
+    settledRef.current = false;
+
+    const channel = supabase.channel(`job:${jobId}`);
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+    const cleanup = () => {
+      channel.unsubscribe();
+      if (pollTimer) clearInterval(pollTimer);
+      clearTimeout(realtimeFallback);
+      clearTimeout(processingTimeout);
+    };
+
+    const finishWithResult = (data: ColdStartResponse) => {
+      if (settledRef.current) return;
+      settledRef.current = true;
+      setResult(data);
+      setLastResult(data);
+      setPhase('idle');
+      localStorage.removeItem(JOB_STORAGE_KEY);
+      cleanup();
+      setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+    };
+
+    const finishWithFailure = (msg?: string | null) => {
+      if (settledRef.current) return;
+      settledRef.current = true;
+      setError(msg || 'Processing failed. Please try again.');
+      setPhase('idle');
+      localStorage.removeItem(JOB_STORAGE_KEY);
+      cleanup();
+    };
+
+    const fetchAndFinishIfDone = async () => {
+      try {
+        const data = await fetchJobResult(jobId);
+        if (isColdStartCompleted(data)) {
+          finishWithResult(data);
+        } else if (data.status === 'failed') {
+          finishWithFailure(data.error_message);
+        }
+      } catch (e) {
+        console.warn('fetchJobResult error', e);
+      }
+    };
+
+    channel
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'cold_start_jobs',
+          filter: `id=eq.${jobId}`,
+        },
+        async (payload) => {
+          const status = (payload.new as { status?: string }).status;
+          if (status === 'completed') {
+            await fetchAndFinishIfDone();
+          } else if (status === 'failed') {
+            finishWithFailure((payload.new as { error_message?: string }).error_message);
+          }
+        },
+      )
+      .subscribe();
+
+    const realtimeFallback = setTimeout(() => {
+      pollTimer = setInterval(fetchAndFinishIfDone, POLL_INTERVAL_MS);
+    }, REALTIME_FALLBACK_MS);
+
+    const processingTimeout = setTimeout(() => {
+      finishWithFailure('This is taking longer than expected. The worker may be down — please try again.');
+    }, PROCESSING_TIMEOUT_MS);
+
+    cleanupRef.current = cleanup;
+  };
+
+  // Mount: resume in-flight job if any
+  useEffect(() => {
+    const savedJobId = localStorage.getItem(JOB_STORAGE_KEY);
+    if (!savedJobId) return;
+
+    let cancelled = false;
+    fetchJobResult(savedJobId)
+      .then((data) => {
+        if (cancelled) return;
+        if (isColdStartCompleted(data)) {
+          setResult(data);
+          setLastResult(data);
+          localStorage.removeItem(JOB_STORAGE_KEY);
+        } else if (data.status === 'pending' || data.status === 'running') {
+          setPhase('processing');
+          attachJobListener(savedJobId);
+        } else {
+          localStorage.removeItem(JOB_STORAGE_KEY);
+        }
+      })
+      .catch(() => localStorage.removeItem(JOB_STORAGE_KEY));
+
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => () => cleanupRef.current?.(), []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.q1 || !form.q2 || !form.q3 || !form.q4 || !form.q5) {
       setError('Please answer all 5 questions.');
       return;
     }
-    setLoading(true);
+    cleanupRef.current?.();
+    settledRef.current = false;
+    setPhase('submitting');
     setError(null);
     setResult(null);
     setSavedForm(form);
+
     try {
-      const data = await fetchColdStart({
+      const ack = await submitColdStart({
         q1_media_type: form.q1,
-        q2_genres: form.q2,
-        q3_title: form.q3,
-        q4_dark: form.q4,
-        q5_familiar: form.q5,
+        q2_genres:     form.q2,
+        q3_title:      form.q3,
+        q4_dark:       form.q4,
+        q5_familiar:   form.q5,
         k: 30,
       });
-      setResult(data);
-      setLastResult(data);
-      setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+
+      // Edge case: the server re-attached us to an already-completed job
+      if (ack.status === 'completed') {
+        const data = await fetchJobResult(ack.job_id);
+        if (isColdStartCompleted(data)) {
+          setResult(data);
+          setLastResult(data);
+          setPhase('idle');
+          setTimeout(() => resultsRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+          return;
+        }
+      }
+
+      localStorage.setItem(JOB_STORAGE_KEY, ack.job_id);
+      setPhase('processing');
+      attachJobListener(ack.job_id);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong.');
-    } finally {
-      setLoading(false);
+      setPhase('idle');
     }
   };
 
@@ -209,6 +357,11 @@ export function ColdStartPage() {
   };
 
   const { movies, shows } = combinedByType();
+  const isLoading = phase !== 'idle';
+  const buttonLabel =
+    phase === 'submitting' ? 'Submitting…' :
+    phase === 'processing' ? 'Processing…' :
+    'Discover';
 
   return (
     <div className="max-w-2xl mx-auto space-y-8">
@@ -220,7 +373,6 @@ export function ColdStartPage() {
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Q1 */}
         <div className="space-y-2">
           <label className="text-sm font-medium text-text-primary">
             1. Do you prefer movies, TV shows, or both?
@@ -237,7 +389,6 @@ export function ColdStartPage() {
           </div>
         </div>
 
-        {/* Q2 */}
         <div className="space-y-2">
           <label className="text-sm font-medium text-text-primary">
             2. Which genres interest you?
@@ -251,7 +402,6 @@ export function ColdStartPage() {
           />
         </div>
 
-        {/* Q3 */}
         <div className="space-y-2">
           <label className="text-sm font-medium text-text-primary">
             3. Name a title you've enjoyed recently
@@ -265,7 +415,6 @@ export function ColdStartPage() {
           />
         </div>
 
-        {/* Q4 */}
         <div className="space-y-2">
           <label className="text-sm font-medium text-text-primary">
             4. How do you feel about dark or intense content?
@@ -282,7 +431,6 @@ export function ColdStartPage() {
           </div>
         </div>
 
-        {/* Q5 */}
         <div className="space-y-2">
           <label className="text-sm font-medium text-text-primary">
             5. Are you looking for something familiar or something new?
@@ -303,14 +451,14 @@ export function ColdStartPage() {
 
         <button
           type="submit"
-          disabled={loading}
+          disabled={isLoading}
           className="w-full py-3 bg-accent hover:bg-accent-hover text-white font-semibold rounded-xl transition disabled:opacity-50"
         >
-          {loading ? 'Finding recommendations…' : 'Discover'}
+          {buttonLabel}
         </button>
       </form>
 
-      {loading && <Spinner />}
+      {phase !== 'idle' && <PhaseSpinner phase={phase} />}
 
       {result && (
         <div ref={resultsRef} className="space-y-6 pt-2">

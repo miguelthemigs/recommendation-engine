@@ -9,7 +9,8 @@ import type {
   WatchlistCompareResponse,
   StatsResponse,
   GraphStats,
-  ColdStartResponse,
+  ColdStartJobAck,
+  ColdStartJobResult,
 } from './types';
 
 export const fetchMovies = (limit: number, offset: number) =>
@@ -98,9 +99,12 @@ export interface ColdStartRequest {
   k?: number;
 }
 
-export const fetchColdStart = (body: ColdStartRequest) =>
-  apiFetch<ColdStartResponse>('/recommend/coldstart', {
+export const submitColdStart = (body: ColdStartRequest) =>
+  apiFetch<ColdStartJobAck>('/recommend/coldstart', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
+
+export const fetchJobResult = (jobId: string) =>
+  apiFetch<ColdStartJobResult>(`/jobs/${jobId}`);

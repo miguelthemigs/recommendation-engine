@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 BASE_DIR = Path(__file__).parent
@@ -41,6 +41,10 @@ BFS_DECAY_FACTOR    = 0.5     # score multiplier for depth-2 neighbors in BFS
 PAGERANK_DAMPING    = 0.85    # standard damping factor for random walk
 PAGERANK_ITERATIONS = 20      # max iterations before forced stop
 PAGERANK_EPSILON    = 1e-6    # convergence threshold (max delta per step)
+
+# ── RabbitMQ ─────────────────────────────────────────────────────────────────
+RABBITMQ_URL    = os.getenv("RABBITMQ_URL", "amqp://guest:guest@localhost:5672/")
+COLDSTART_QUEUE = "coldstart_jobs"
 
 # ── Cold Start ───────────────────────────────────────────────────────────────
 OPENAI_API_KEY    = os.getenv("OPENAI_API_KEY", "")

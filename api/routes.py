@@ -527,98 +527,125 @@ class ColdStartRequest(BaseModel):
 
 @router.post(
     "/recommend/coldstart",
-    summary="Cold-start recommendations — LLM taste extraction + BFS",
+    summary="Submit a cold-start job (async). Returns a job_id immediately.",
     tags=["recommendations"],
 )
 def recommend_coldstart(
     body: ColdStartRequest,
-    user: Optional[dict] = Depends(get_optional_user),
+    user: dict = Depends(get_current_user),
 ) -> dict:
-    from core.coldstart import get_coldstart_recommendations, UserAnswers
+    """
+    Async flow:
+      1. If the user already has a pending/running job, re-attach to it.
+      2. Otherwise insert a new pending row and publish to RabbitMQ.
+      3. Return job_id immediately — the worker fills in the result.
+    """
+    import uuid
+    from core.publisher import publish_coldstart_job
     from core.supabase_client import get_supabase
 
-    t0      = time.perf_counter()
-    answers = UserAnswers(
-        q1_media_type=body.q1_media_type,
-        q2_genres=body.q2_genres,
-        q3_title=body.q3_title,
-        q4_dark=body.q4_dark,
-        q5_familiar=body.q5_familiar,
-    )
+    client = get_supabase()
+    user_id = user["sub"]
 
-    # Create job row if user is authenticated
-    job_id = None
-    if user:
-        client = get_supabase()
-        job_resp = client.table("cold_start_jobs").insert({
-            "user_id": user["sub"],
-            "status": "running",
-            "answers": {
-                "q1_media_type": body.q1_media_type,
-                "q2_genres": body.q2_genres,
-                "q3_title": body.q3_title,
-                "q4_dark": body.q4_dark,
-                "q5_familiar": body.q5_familiar,
-            },
-            "started_at": "now()",
-        }).execute()
-        job_id = job_resp.data[0]["id"] if job_resp.data else None
+    # Re-attach if a job is already in flight for this user
+    existing = (
+        client.table("cold_start_jobs")
+        .select("id, status")
+        .eq("user_id", user_id)
+        .in_("status", ["pending", "running"])
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    if existing.data:
+        return {"job_id": existing.data[0]["id"], "status": existing.data[0]["status"]}
+
+    job_id = str(uuid.uuid4())
+    answers_payload = {
+        "q1_media_type": body.q1_media_type,
+        "q2_genres":     body.q2_genres,
+        "q3_title":      body.q3_title,
+        "q4_dark":       body.q4_dark,
+        "q5_familiar":   body.q5_familiar,
+    }
+
+    client.table("cold_start_jobs").insert({
+        "id":      job_id,
+        "user_id": user_id,
+        "status":  "pending",
+        "answers": answers_payload,
+    }).execute()
 
     try:
-        result   = get_coldstart_recommendations(answers, top_k=body.k)
-        query_ms = round((time.perf_counter() - t0) * 1000, 3)
+        publish_coldstart_job(job_id)
+    except Exception as e:
+        client.table("cold_start_jobs").update({
+            "status": "failed",
+            "error_message": f"Queue unavailable: {e}",
+            "completed_at": "now()",
+        }).eq("id", job_id).execute()
+        raise HTTPException(
+            status_code=503,
+            detail="Queue is unavailable. Please try again in a moment.",
+        )
 
-        seed_items = [
-            store.get_item(int(sid))
-            for sid in result.seed_ids
-            if store.get_item(int(sid))
-        ]
+    return {"job_id": job_id, "status": "pending"}
 
-        response = {
-            "algorithm":     "coldstart_bfs",
-            "query_time_ms": query_ms,
-            "llm_time_ms":   result.llm_time_ms,
-            "signals": {
-                "genres":           result.signals.genres,
-                "keywords":         result.signals.keywords,
-                "reference_titles": result.signals.reference_titles,
-                "mood":             result.signals.mood,
-            },
-            "seeds":       seed_items,
-            "token_cost": {
-                "input_tokens":  result.input_tokens,
-                "output_tokens": result.output_tokens,
-            },
-            "recommendations": _resolve_watchlist_neighbors(result.recommendations),
+
+@router.get(
+    "/jobs/{job_id}",
+    summary="Get status (and result, if completed) of a cold-start job",
+    tags=["recommendations"],
+)
+def get_job(
+    job_id: str,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    from core.supabase_client import get_supabase
+    client = get_supabase()
+
+    resp = (
+        client.table("cold_start_jobs")
+        .select("*")
+        .eq("id", job_id)
+        .eq("user_id", user["sub"])
+        .maybe_single()
+        .execute()
+    )
+
+    if not resp or not resp.data:
+        raise HTTPException(status_code=404, detail="Job not found.")
+
+    job = resp.data
+    if job["status"] != "completed":
+        return {
+            "id":         job["id"],
+            "status":     job["status"],
+            "created_at": job["created_at"],
+            "error_message": job.get("error_message"),
         }
 
-        # Update job to completed
-        if job_id:
-            client.table("cold_start_jobs").update({
-                "status": "completed",
-                "signals": response["signals"],
-                "seed_ids": result.seed_ids,
-                "recommendations": [
-                    {"tmdb_id": r["id"], "score": r["score"]}
-                    for r in response["recommendations"]
-                ],
-                "token_cost": response["token_cost"],
-                "llm_time_ms": result.llm_time_ms,
-                "total_time_ms": query_ms,
-                "completed_at": "now()",
-            }).eq("id", job_id).execute()
+    seed_items = [
+        store.get_item(int(sid))
+        for sid in (job.get("seed_ids") or [])
+        if store.get_item(int(sid))
+    ]
 
-        return response
+    recommendations = []
+    for r in (job.get("recommendations") or []):
+        item = store.get_item(int(r["tmdb_id"]))
+        if item:
+            recommendations.append({**item, "score": round(r["score"], 6)})
 
-    except Exception as e:
-        # Update job to failed
-        if job_id:
-            client.table("cold_start_jobs").update({
-                "status": "failed",
-                "error_message": str(e),
-                "completed_at": "now()",
-            }).eq("id", job_id).execute()
-        raise
+    return {
+        "algorithm":       "coldstart_bfs",
+        "query_time_ms":   job.get("total_time_ms") or 0,
+        "llm_time_ms":     job.get("llm_time_ms") or 0,
+        "signals":         job.get("signals") or {},
+        "seeds":           seed_items,
+        "token_cost":      job.get("token_cost") or {"input_tokens": 0, "output_tokens": 0},
+        "recommendations": recommendations,
+    }
 
 
 # ── Graph / index stats ────────────────────────────────────────────────────────

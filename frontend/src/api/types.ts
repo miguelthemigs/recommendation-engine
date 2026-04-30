@@ -115,3 +115,22 @@ export interface ColdStartResponse {
   token_cost: { input_tokens: number; output_tokens: number };
   recommendations: WatchlistScoredItem[];
 }
+
+export interface ColdStartJobAck {
+  job_id: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+}
+
+export interface ColdStartJobStatus {
+  id: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  created_at: string;
+  error_message?: string | null;
+}
+
+export type ColdStartJobResult = ColdStartResponse | ColdStartJobStatus;
+
+export const isColdStartCompleted = (
+  data: ColdStartJobResult,
+): data is ColdStartResponse =>
+  (data as ColdStartResponse).algorithm === 'coldstart_bfs';
