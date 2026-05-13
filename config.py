@@ -53,6 +53,10 @@ COLDSTART_MAX_TOKENS = 512
 COLDSTART_SEED_COUNT = 5     # seed IDs fed into BFS
 COLDSTART_SEARCH_LIMIT = 3   # store.search results taken per query
 
+# ── Rate Limiting (cold start LLM calls) ─────────────────────────────────────
+COLDSTART_RATE_LIMIT_COUNT          = 5      # non-failed jobs allowed per window
+COLDSTART_RATE_LIMIT_WINDOW_SECONDS = 3600   # sliding window length (1 hour)
+
 COLDSTART_QUESTIONS: list[str] = [
     "Do you prefer movies, TV shows, or both?",
     "Which genres interest you? (e.g. Action, Drama, Comedy, Thriller, Horror, Sci-Fi)",

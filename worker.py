@@ -21,7 +21,7 @@ import logging
 import pika
 
 from config import COLDSTART_QUEUE, RABBITMQ_URL
-from core.coldstart import UserAnswers, get_coldstart_recommendations
+from core.coldstart import MOCK_OPENAI, MOCK_OPENAI_DELAY_MS, UserAnswers, get_coldstart_recommendations
 from core.supabase_client import get_supabase
 
 logging.basicConfig(
@@ -108,6 +108,12 @@ def _process(ch, method, properties, body: bytes) -> None:
 
 
 def main() -> None:
+    if MOCK_OPENAI:
+        logger.warning("=" * 60)
+        logger.warning("MOCK_OPENAI MODE ACTIVE — load-testing only, no real LLM calls")
+        logger.warning("Simulated delay: %d ms per job", MOCK_OPENAI_DELAY_MS)
+        logger.warning("=" * 60)
+
     logger.info("bootstrapping store + graph + tfidf...")
     _bootstrap()
     logger.info("bootstrap complete")

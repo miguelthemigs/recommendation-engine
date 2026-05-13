@@ -11,6 +11,7 @@ Flow:
 
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 
@@ -32,6 +33,11 @@ logger = logging.getLogger(__name__)
 
 # Module-level singleton — instantiated once on first import
 _client = OpenAI(api_key=OPENAI_API_KEY)
+
+# Mock mode for load testing — bypasses OpenAI to remove cost and external variance.
+# Activated via MOCK_OPENAI=true env var. Worker logs a banner on startup if set.
+MOCK_OPENAI = os.getenv("MOCK_OPENAI", "").lower() == "true"
+MOCK_OPENAI_DELAY_MS = int(os.getenv("MOCK_OPENAI_DELAY_MS", "2000"))
 
 
 # ── Public data types ─────────────────────────────────────────────────────────
@@ -66,6 +72,27 @@ class ColdStartResult:
 
 # ── Private helpers ───────────────────────────────────────────────────────────
 
+def _mock_llm(answers: UserAnswers) -> tuple[TasteSignals, int, int, float]:
+    """
+    Load-test mock: sleep MOCK_OPENAI_DELAY_MS then return canned signals.
+
+    Signals are intentionally generic so the genre-overlap fallback in
+    _ground_signals always produces seeds, regardless of the dataset's exact
+    contents. The mock returns realistic shape so the BFS step still runs.
+    """
+    t0 = time.perf_counter()
+    time.sleep(MOCK_OPENAI_DELAY_MS / 1000)
+    elapsed_ms = round((time.perf_counter() - t0) * 1000, 2)
+
+    signals = TasteSignals(
+        genres=["Action", "Drama", "Adventure"],
+        keywords=["mystery", "family", "rescue"],
+        reference_titles=[],
+        mood="neutral",
+    )
+    return signals, 0, 0, elapsed_ms
+
+
 def _call_llm(answers: UserAnswers) -> tuple[TasteSignals, int, int, float]:
     """
     Send the formatted prompt to Claude, parse the JSON response.
@@ -73,6 +100,9 @@ def _call_llm(answers: UserAnswers) -> tuple[TasteSignals, int, int, float]:
     Returns (signals, input_tokens, output_tokens, elapsed_ms).
     Raises ValueError if the LLM response is not valid JSON.
     """
+    if MOCK_OPENAI:
+        return _mock_llm(answers)
+
     prompt = COLDSTART_PROMPT_V1.format(
         q1=answers.q1_media_type,
         q2=answers.q2_genres,

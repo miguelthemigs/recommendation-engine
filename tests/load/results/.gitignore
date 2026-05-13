@@ -1,0 +1,9 @@
+# Don't commit raw test artifacts — they're large and machine-specific.
+# A sample run can be committed by force-adding the specific file:
+#   git add -f tests/load/results/1worker/k6_report.html
+*.csv
+*.html
+*.json
+*.log
+!.gitignore
+!.gitkeep

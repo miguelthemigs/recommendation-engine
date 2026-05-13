@@ -1,6 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { submitColdStart, fetchJobResult } from '../api/endpoints';
+import {
+  submitColdStart,
+  fetchJobResult,
+  getColdStartQuota,
+  type ColdStartQuota,
+} from '../api/endpoints';
+import { ApiError } from '../api/client';
 import {
   type ColdStartResponse,
   type MediaItem,
@@ -49,6 +55,48 @@ function OptionButton({
     >
       {label}
     </button>
+  );
+}
+
+function formatResetTime(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+function QuotaBadge({ quota }: { quota: ColdStartQuota }) {
+  if (quota.is_admin) {
+    return (
+      <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-accent/15 border border-accent/30 text-xs">
+        <span className="font-semibold text-accent">Admin</span>
+        <span className="text-text-muted">unlimited cold-starts</span>
+      </div>
+    );
+  }
+  const resetLabel = formatResetTime(quota.reset_at);
+  const exhausted = quota.remaining <= 0;
+  return (
+    <div
+      className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs ${
+        exhausted
+          ? 'bg-red-500/10 border-red-500/30 text-red-300'
+          : 'bg-surface-card border-surface-border text-text-secondary'
+      }`}
+    >
+      <span className="font-semibold">
+        {quota.used} / {quota.limit}
+      </span>
+      <span className="text-text-muted">requests this hour</span>
+      {resetLabel && quota.used > 0 && (
+        <>
+          <span className="text-text-muted">·</span>
+          <span className="text-text-muted">
+            {exhausted ? `available at ${resetLabel}` : `next slot at ${resetLabel}`}
+          </span>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -166,9 +214,18 @@ export function ColdStartPage() {
   const [phase, setPhase] = useState<LoadingPhase>('idle');
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ColdStartResponse | null>(lastResult);
+  const [quota, setQuota] = useState<ColdStartQuota | null>(null);
 
   const cleanupRef = useRef<(() => void) | null>(null);
   const settledRef = useRef(false);
+
+  const refreshQuota = useCallback(async () => {
+    try {
+      setQuota(await getColdStartQuota());
+    } catch {
+      // Silent: not logged in, network blip, etc. — badge just won't render.
+    }
+  }, []);
 
   const set = (key: keyof FormState) => (val: string) =>
     setForm(prev => ({ ...prev, [key]: val }));
@@ -231,6 +288,8 @@ export function ColdStartPage() {
       setPhase('idle');
       localStorage.removeItem(JOB_STORAGE_KEY);
       cleanup();
+      // Failed jobs don't count toward the quota — refresh so the badge reflects this.
+      void refreshQuota();
     };
 
     const fetchAndFinishIfDone = async () => {
@@ -276,6 +335,11 @@ export function ColdStartPage() {
 
     cleanupRef.current = cleanup;
   };
+
+  // Mount: load quota for the badge
+  useEffect(() => {
+    void refreshQuota();
+  }, [refreshQuota]);
 
   // Mount: resume in-flight job if any
   useEffect(() => {
@@ -343,8 +407,35 @@ export function ColdStartPage() {
       localStorage.setItem(JOB_STORAGE_KEY, ack.job_id);
       setPhase('processing');
       attachJobListener(ack.job_id);
+      void refreshQuota();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong.');
+      if (err instanceof ApiError && err.status === 429) {
+        const detail = err.detail as {
+          message?: string;
+          limit?: number;
+          used?: number;
+          remaining?: number;
+          reset_at?: string | null;
+        } | null;
+        const resetLabel = formatResetTime(detail?.reset_at ?? null);
+        setError(
+          (detail?.message ?? 'Rate limit exceeded.') +
+            (resetLabel ? ` Next slot at ${resetLabel}.` : ''),
+        );
+        if (detail) {
+          setQuota({
+            is_admin:  false,
+            used:      detail.used ?? 0,
+            limit:     detail.limit ?? 5,
+            remaining: detail.remaining ?? 0,
+            reset_at:  detail.reset_at ?? null,
+          });
+        } else {
+          void refreshQuota();
+        }
+      } else {
+        setError(err instanceof Error ? err.message : 'Something went wrong.');
+      }
       setPhase('idle');
     }
   };
@@ -365,11 +456,12 @@ export function ColdStartPage() {
 
   return (
     <div className="max-w-2xl mx-auto space-y-8">
-      <div>
+      <div className="space-y-3">
         <h1 className="text-2xl font-bold text-text-primary">Discover</h1>
-        <p className="text-text-muted text-sm mt-1">
+        <p className="text-text-muted text-sm">
           Answer 5 questions and we'll build a personalised recommendation list.
         </p>
+        {quota && <QuotaBadge quota={quota} />}
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">

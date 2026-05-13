@@ -108,3 +108,16 @@ export const submitColdStart = (body: ColdStartRequest) =>
 
 export const fetchJobResult = (jobId: string) =>
   apiFetch<ColdStartJobResult>(`/jobs/${jobId}`);
+
+// ── Cold-start quota ──────────────────────────────────────────────────────────
+
+export interface ColdStartQuota {
+  is_admin:  boolean;
+  used:      number;
+  limit:     number;          // -1 if admin (unlimited)
+  remaining: number;          // -1 if admin (unlimited)
+  reset_at:  string | null;   // ISO8601 — when the oldest counted job ages out
+}
+
+export const getColdStartQuota = () =>
+  apiFetch<ColdStartQuota>('/recommend/coldstart/quota');

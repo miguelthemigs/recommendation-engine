@@ -543,6 +543,7 @@ def recommend_coldstart(
     import uuid
     from core.publisher import publish_coldstart_job
     from core.supabase_client import get_supabase
+    from core.rate_limit import get_quota_state
 
     client = get_supabase()
     user_id = user["sub"]
@@ -559,6 +560,21 @@ def recommend_coldstart(
     )
     if existing.data:
         return {"job_id": existing.data[0]["id"], "status": existing.data[0]["status"]}
+
+    # Rate-limit check (admins bypass). Sliding window counts non-failed jobs.
+    quota = get_quota_state(client, user_id)
+    if not quota.is_admin and quota.remaining <= 0:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code":      "coldstart_rate_limit_exceeded",
+                "message":   f"You've used {quota.used}/{quota.limit} cold-start requests this hour.",
+                "limit":     quota.limit,
+                "used":      quota.used,
+                "remaining": 0,
+                "reset_at":  quota.reset_at,
+            },
+        )
 
     job_id = str(uuid.uuid4())
     answers_payload = {
@@ -590,6 +606,25 @@ def recommend_coldstart(
         )
 
     return {"job_id": job_id, "status": "pending"}
+
+
+@router.get(
+    "/recommend/coldstart/quota",
+    summary="Current cold-start quota for the authenticated user",
+    tags=["recommendations"],
+)
+def get_coldstart_quota(user: dict = Depends(get_current_user)) -> dict:
+    from core.supabase_client import get_supabase
+    from core.rate_limit import get_quota_state
+
+    quota = get_quota_state(get_supabase(), user["sub"])
+    return {
+        "is_admin":  quota.is_admin,
+        "used":      quota.used,
+        "limit":     quota.limit,
+        "remaining": quota.remaining,
+        "reset_at":  quota.reset_at,
+    }
 
 
 @router.get(

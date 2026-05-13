@@ -1,0 +1,104 @@
+{
+  "accounts": [
+    {
+      "email": "loadtest-admin-01@example.com",
+      "password": "gWwTzTsTuXNzjonHMso4",
+      "user_id": "852fc1a0-3db2-4862-b572-6fac08379ed5"
+    },
+    {
+      "email": "loadtest-admin-02@example.com",
+      "password": "Y7VkNDcwIjrHsT3yqX9Q",
+      "user_id": "0fee609c-38d4-4a4d-bac6-080118e36b52"
+    },
+    {
+      "email": "loadtest-admin-03@example.com",
+      "password": "9B5jivUEEnTzQciihRTX",
+      "user_id": "8a827967-4200-4bed-9ae0-afaa0022d835"
+    },
+    {
+      "email": "loadtest-admin-04@example.com",
+      "password": "1AQB9BRpxwjQkpuiaEzf",
+      "user_id": "11209837-e299-4982-ad49-8667e38ae0dc"
+    },
+    {
+      "email": "loadtest-admin-05@example.com",
+      "password": "GJlRqEAO1PnQ0gxhyJ8c",
+      "user_id": "3cb4a645-14e7-4d34-b1c3-98ec76e02162"
+    },
+    {
+      "email": "loadtest-admin-06@example.com",
+      "password": "bMURDhsQLuWxFKM7TosY",
+      "user_id": "3ce35247-5c85-4b3e-b79a-d5b61e5ebc51"
+    },
+    {
+      "email": "loadtest-admin-07@example.com",
+      "password": "jgIsPV0cB19f2ecwTwjY",
+      "user_id": "da34bd2a-67c0-4c2c-8eab-5a91cd88d35d"
+    },
+    {
+      "email": "loadtest-admin-08@example.com",
+      "password": "fJXa7Nu0Q9AH2eU8uJU2",
+      "user_id": "8299f4e2-27ca-4f05-9a4b-80b8629004c0"
+    },
+    {
+      "email": "loadtest-admin-09@example.com",
+      "password": "BumJgkitW6YkgD7QxIpJ",
+      "user_id": "693cb04d-c070-4fb7-a710-53f468e0fa80"
+    },
+    {
+      "email": "loadtest-admin-10@example.com",
+      "password": "OJY3F8NQXo1kQ5iogaEm",
+      "user_id": "141c2327-1443-4ea1-8f42-1290e3775a75"
+    },
+    {
+      "email": "loadtest-admin-11@example.com",
+      "password": "S5gYRPHlFkp5Njt0WJCN",
+      "user_id": "5753a57a-4345-4d2c-beb3-fcbe6e728ce6"
+    },
+    {
+      "email": "loadtest-admin-12@example.com",
+      "password": "DC4kS2rWKfQKkzsfDC3h",
+      "user_id": "1a4d0396-99b5-48a1-bd1b-67a8cb072153"
+    },
+    {
+      "email": "loadtest-admin-13@example.com",
+      "password": "VpwDuvs8H50875jCGIJQ",
+      "user_id": "504fbaf9-3757-40d9-ad43-6144538f764b"
+    },
+    {
+      "email": "loadtest-admin-14@example.com",
+      "password": "BUZfpmbDgkLvOdEf4qJ1",
+      "user_id": "38044fcb-0509-4f6c-8e80-45fd8bb4408a"
+    },
+    {
+      "email": "loadtest-admin-15@example.com",
+      "password": "AEZX6XjHouUBrB0zN0M2",
+      "user_id": "2a75fad6-6d78-4bcd-930e-0e5f4c8dccd1"
+    },
+    {
+      "email": "loadtest-admin-16@example.com",
+      "password": "wNMmcGUsG9ljdHJ6ZsmP",
+      "user_id": "4e5aa0fc-3bb2-4430-a2bd-1d4c89253ff8"
+    },
+    {
+      "email": "loadtest-admin-17@example.com",
+      "password": "ZZu0HKomZElR6u93jmU3",
+      "user_id": "39051d19-957f-4870-a257-36f88c41296c"
+    },
+    {
+      "email": "loadtest-admin-18@example.com",
+      "password": "rozirOyxX1wY6U371EAV",
+      "user_id": "934881a8-f838-4de0-a318-ff8e6644970c"
+    },
+    {
+      "email": "loadtest-admin-19@example.com",
+      "password": "0WRtCEAg5TeSTtOa7L2l",
+      "user_id": "930d46fe-9a05-48ea-9a5e-633b39133ff2"
+    },
+    {
+      "email": "loadtest-admin-20@example.com",
+      "password": "sEf7Byz6Bi0P0KLSOlIJ",
+      "user_id": "28e20112-3689-4f99-bc23-157977b0873a"
+    }
+  ]
+}
