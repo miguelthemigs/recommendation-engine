@@ -19,6 +19,18 @@ SUPABASE_ANON_KEY         = os.getenv("SUPABASE_ANON_KEY", "")
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 SUPABASE_JWT_SECRET       = os.getenv("SUPABASE_JWT_SECRET", "")
 
+# ── CORS ─────────────────────────────────────────────────────────────────────
+# Comma-separated list of allowed frontend origins. Override per environment
+# (e.g. the Vercel domain in production). Defaults to the local dev servers.
+ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv(
+        "ALLOWED_ORIGINS",
+        "http://localhost:5173,http://localhost:5174",
+    ).split(",")
+    if origin.strip()
+]
+
 # ── TMDB ───────────────────────────────────────────────────────────────────────
 TMDB_API_KEY  = os.getenv("TMDB_API_KEY", "")
 TMDB_BASE_URL = "https://api.themoviedb.org/3"

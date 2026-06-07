@@ -1,0 +1,65 @@
+# rec-engine backend stack — broker + API + worker.
+#
+# One command builds the shared image and starts everything in order:
+#     docker compose up --build
+#
+# Startup is healthcheck-gated: api and worker wait until RabbitMQ reports healthy.
+# The frontend is NOT here — it ships to Vercel (Cycle 5); run it locally with
+# `cd frontend && npm run dev` pointing VITE_API_URL at http://localhost:8000.
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rec-rabbitmq
+    ports:
+      - "5672:5672"     # AMQP
+      - "15672:15672"   # management UI (guest/guest)
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+
+  api:
+    build: .
+    image: rec-engine:latest
+    container_name: rec-api
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      # Override the localhost default — reach the broker by its compose service name.
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      # slim image has no curl — use python's urllib to hit /health
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s   # allow time for store.load + graph + tfidf build
+
+  worker:
+    build: .
+    image: rec-engine:latest
+    container_name: rec-worker
+    command: python worker.py
+    env_file:
+      - .env
+    environment:
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+volumes:
+  rabbitmq_data:

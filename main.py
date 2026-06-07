@@ -15,6 +15,7 @@ Then visit: http://localhost:8000/docs
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from config import ALLOWED_ORIGINS
 from core.store import store
 from api.routes import router
 
@@ -46,7 +47,7 @@ Graph-based recommendation engine for movies and TV shows.
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:5174"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],

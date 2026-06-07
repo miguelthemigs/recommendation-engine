@@ -1,0 +1,37 @@
+# Keep the build context small and free of secrets.
+
+# Version control
+.git/
+.gitignore
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Secrets & local env — never bake into an image
+.env
+.env.*
+
+# Frontend ships to Vercel, not this backend image
+frontend/
+
+# Data cache — loaded from Supabase at runtime
+data/
+
+# Tests, load-test artifacts, future deploy dirs
+tests/
+k8s/
+docker/
+
+# Docs & editor tooling
+*.md
+.claude/
+.vscode/
+.idea/
+
+# Virtualenvs
+.venv/
+venv/
