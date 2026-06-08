@@ -62,7 +62,7 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _on_signal)
 
     print(f"[monitor] polling {url} every {args.interval}s -> {out_path}", flush=True)
-    print(f"[monitor] press Ctrl+C to stop", flush=True)
+    print("[monitor] press Ctrl+C to stop", flush=True)
 
     samples = 0
     with out_path.open("w", newline="", encoding="utf-8") as fh:

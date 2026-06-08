@@ -16,8 +16,8 @@ Stack (decided in Cycle 1): **Vercel** (frontend) · **minikube + Cloudflare Tun
 |---|---|---|
 | 1 | Deployment Research | ✅ Complete |
 | 2 | Containerisation | ✅ Complete |
-| 3 | CI/CD Pipeline | 🔲 Next |
-| 4 | Kubernetes (minikube) | 🔲 Not started |
+| 3 | CI/CD Pipeline | 🟡 Built — pending first green run on GitHub |
+| 4 | Kubernetes (minikube) | 🔲 Next |
 | 5 | Public Deployment | 🔲 Not started |
 | 6 (optional) | Autoscaling | 🔲 Not started |
 
@@ -79,24 +79,45 @@ worker connected to the broker via the `rabbitmq` service name and `waiting for 
 
 ---
 
-## Cycle 3 — CI/CD Pipeline 🔲 (next)
+## Cycle 3 — CI/CD Pipeline 🟡 (built, pending first green run)
 
 GitHub Actions on push to `main`: **lint → test → build the shared image → push to GHCR.**
+Decisions made up front: minimal **pytest** suite (not a container smoke test), **ruff**
+for lint, **backend-only** (Vercel owns the frontend pipeline).
 
-**First decision to make:** there are currently **no pytest unit tests** — only k6 load
-tests under `tests/load/`. So the "test" stage is either (a) a smoke test that builds the
-image and imports the app / hits `/health` in a throwaway container, or (b) add a minimal
-pytest suite. Decide this before writing the workflow.
+**What was built**
 
-Outline:
-- Trigger: `push` to `main` (+ PRs for the lint/test stages).
-- Lint: `ruff`/`flake8` (pick one) on the Python; `tsc` on the frontend.
-- Build + push: `docker/build-push-action` → `ghcr.io/<owner>/rec-engine:latest` + SHA tag.
-- Auth: `GITHUB_TOKEN` with `packages: write`; no long-lived secrets.
+| Artifact | Purpose |
+|---|---|
+| `tests/unit/` | Hermetic pytest suite (21 tests, no network/Supabase/OpenAI): `similarity`, `graph`, `watchlist` (direct + BFS), `tfidf`, and `config` (locks the Cycle 2 env-driven CORS contract). |
+| `pyproject.toml` | Tooling config only — `[tool.ruff]` (pyflakes + pycodestyle subset) and `[tool.pytest.ini_options]` (`pythonpath="."`, `testpaths="tests/unit"`). Not a package build file. |
+| `requirements-dev.txt` | CI-only `pytest` + `ruff`, kept out of `requirements.lock` so they never ship in the runtime image. |
+| `.github/workflows/ci.yml` | Three jobs: `lint` (ruff) and `test` (pytest) on every push + PR; `build-and-push` (shared image → GHCR) gated on push to `main`. |
+
+**Pipeline shape**
+- **Trigger:** `push` to `main` + all `pull_request`s. Lint/test always run; the build job
+  has `if: push && ref == main` so PRs (incl. forks) never need registry write access.
+- **Lint:** `ruff check .` (config in `pyproject.toml`; frontend/data/results excluded).
+- **Test:** `pip install -r requirements.lock -r requirements-dev.txt` → `pytest`.
+- **Build + push:** `docker/build-push-action@v6` → `ghcr.io/${{ github.repository }}`
+  tagged `latest` + `sha-<commit>` (immutable pin for Cycle 4 k8s), GHA layer cache.
+- **Auth:** `secrets.GITHUB_TOKEN` with job-scoped `packages: write` — no long-lived secrets.
+
+**The "no source changes" rule held:** the only app-adjacent edits were 8 ruff auto-fixes
+(unused imports, unused exception var, placeholder-less f-strings) — all behaviour-preserving.
+
+**Verified locally:** `ruff check .` → clean; `pytest` → 21 passed. The build is unchanged
+from the Cycle 2 image (already verified end-to-end). The one thing that can only be proven
+on GitHub — the workflow running green and an image landing in GHCR — is **pending the first
+push**. Cycle stays 🟡 until that run is green, per the "verified before done" rule.
+
+**To verify (the remaining step):** push to `main` → watch the Actions run go green → confirm
+the package appears at `ghcr.io/miguelthemigs/recommendation-engine` (`latest` + `sha-…`).
+First run may need the GHCR package set to the right visibility/permissions in repo settings.
 
 ---
 
-## Cycle 4 — Kubernetes (minikube) 🔲
+## Cycle 4 — Kubernetes (minikube) 🔲 (next)
 
 Backend running in minikube, all pods healthy.
 

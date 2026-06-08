@@ -11,7 +11,6 @@ Usage:
 import csv
 import json
 from pathlib import Path
-from statistics import mean
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 RUNS = ["1worker", "2workers", "3workers"]

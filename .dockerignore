@@ -26,6 +26,11 @@ tests/
 k8s/
 docker/
 
+# CI + dev-only tooling — not part of the runtime image
+.github/
+pyproject.toml
+requirements-dev.txt
+
 # Docs & editor tooling
 *.md
 .claude/

@@ -1,0 +1,21 @@
+# Tooling config only (ruff + pytest). This is NOT a package build file —
+# app dependencies stay in requirements.txt / requirements.lock, and app
+# constants stay in config.py. This file only configures the dev/CI toolchain.
+
+[tool.ruff]
+target-version = "py313"
+# The backend is the lint surface. The frontend has its own toolchain (tsc/Vite,
+# built by Vercel); data/ is generated cache; the load-test results are artifacts.
+extend-exclude = ["frontend", "data", "tests/load/results"]
+
+[tool.ruff.lint]
+# Ruff defaults: pyflakes (F) + a curated pycodestyle (E) subset. Catches the
+# real problems (unused imports/vars, undefined names) without line-length noise.
+select = ["E4", "E7", "E9", "F"]
+
+[tool.pytest.ini_options]
+# Run from the repo root so `import config` / `from core... import ...` resolve
+# the same way the app does. Only the hermetic unit suite runs in CI —
+# tests/load/ is k6 + live-service tooling and is intentionally excluded.
+pythonpath = ["."]
+testpaths = ["tests/unit"]

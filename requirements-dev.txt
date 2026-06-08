@@ -1,0 +1,9 @@
+# Dev / CI-only tooling. Deliberately separate from requirements.txt so the
+# runtime image (built from requirements.lock) stays lean — pytest and ruff
+# never ship inside the API/worker image.
+#
+# Install the app's runtime deps first, then these:
+#   pip install -r requirements.lock -r requirements-dev.txt
+
+pytest==9.0.3
+ruff==0.15.16

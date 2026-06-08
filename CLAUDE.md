@@ -53,7 +53,10 @@ rec-engine/
 ├── .dockerignore                ← (Flavour 4 C2) small, secret-free build context ✅
 ├── docker-compose.yml           ← (Flavour 4 C2) api + worker + rabbitmq local stack ✅
 ├── .env.example / frontend/.env.example ← (Flavour 4 C2) tracked env templates ✅
-├── .github/workflows/           ← (Flavour 4 C3) CI: lint + test + build + push GHCR 🔲
+├── .github/workflows/ci.yml     ← (Flavour 4 C3) CI: ruff lint + pytest + build/push GHCR 🟡
+├── tests/unit/                  ← (Flavour 4 C3) hermetic pytest suite (21 tests, no I/O) ✅
+├── pyproject.toml               ← (Flavour 4 C3) ruff + pytest config (tooling only) ✅
+├── requirements-dev.txt         ← (Flavour 4 C3) CI-only pytest + ruff (not in runtime image) ✅
 ├── k8s/                         ← (Flavour 4 C4) minikube manifests 🔲
 └── .env                         ← SUPABASE/RABBITMQ/OPENAI + load-test creds
 ```
@@ -153,7 +156,7 @@ Deployment was the optional tail of Flavour 3; it is now its own flavour, broken
 |---|---|---|
 | 1 | Deployment Research — free-tier hosting decision (frontend / stateful k8s backend / registry) | Not started |
 | 2 | Containerization — one shared image (api+worker) + docker-compose; `VITE_API_URL` / `ALLOWED_ORIGINS` env config | Complete (see `FLAVOUR4_CYCLES.md`) |
-| 3 | CI/CD — GitHub Actions: lint + test + build + push images to GHCR | Not started |
+| 3 | CI/CD — GitHub Actions: ruff lint + pytest + build/push shared image to GHCR | Built — pending first green run on GitHub |
 | 4 | Kubernetes — minikube: deployments/service/ingress, ConfigMap+Secret, `/health` + `/graph/stats` probes | Not started |
 | 5 | Public Deployment — Vercel frontend + Cloudflare Tunnel to minikube ingress, end-to-end public smoke test | Not started |
 | 6 (optional) | Autoscaling — KEDA/HPA worker scaling on RabbitMQ queue depth | Not started |

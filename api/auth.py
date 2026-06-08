@@ -7,7 +7,7 @@ Validates tokens using Supabase's JWKS (ES256 asymmetric keys).
 
 from typing import Optional
 from fastapi import Request, HTTPException
-from jose import jwt, JWTError, jwk
+from jose import jwt, JWTError
 import requests
 from config import SUPABASE_URL
 
@@ -64,7 +64,7 @@ def get_current_user(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Missing authorization token.")
     try:
         payload = _decode_token(token)
-    except JWTError as e:
+    except JWTError:
         raise HTTPException(status_code=401, detail="Invalid or expired token.")
     return payload
 

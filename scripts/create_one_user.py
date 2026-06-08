@@ -13,7 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from dotenv import load_dotenv, dotenv_values
+from dotenv import load_dotenv
 from supabase import create_client, Client
 
 ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
@@ -95,7 +95,7 @@ def main() -> None:
         if k not in seen:
             out.append(f"{k}={v}")
     ENV_PATH.write_text("\n".join(out) + "\n", encoding="utf-8")
-    print(f"  wrote USER_EMAIL/USER_PASSWORD to .env")
+    print("  wrote USER_EMAIL/USER_PASSWORD to .env")
 
 
 if __name__ == "__main__":
