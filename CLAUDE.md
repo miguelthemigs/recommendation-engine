@@ -57,7 +57,7 @@ rec-engine/
 ├── tests/unit/                  ← (Flavour 4 C3) hermetic pytest suite (21 tests, no I/O) ✅
 ├── pyproject.toml               ← (Flavour 4 C3) ruff + pytest config (tooling only) ✅
 ├── requirements-dev.txt         ← (Flavour 4 C3) CI-only pytest + ruff (not in runtime image) ✅
-├── k8s/                         ← (Flavour 4 C4) minikube manifests 🔲
+├── k8s/                         ← (Flavour 4 C4) minikube manifests + README runbook ✅
 └── .env                         ← SUPABASE/RABBITMQ/OPENAI + load-test creds
 ```
 
@@ -126,7 +126,7 @@ rec-engine/
 - Two runtime images, one codebase: API (`main.py`) and worker (`worker.py`) ship as separate images but share the same heavy bootstrap (`store.load` + `graph.build` + `tfidf.build`). Build once, run as two deployments.
 - Config is env-driven, never baked in. The two C2 blockers are now fixed: frontend API URL reads `VITE_API_URL` (`frontend/src/api/client.ts`); backend CORS reads `ALLOWED_ORIGINS` (`config.py` → `main.py`). No new hardcoded hosts.
 - Secrets (Supabase keys, OpenAI key) live in a k8s `Secret`, never in an image or committed manifest. Non-secret config in a `ConfigMap`.
-- Probes already exist — reuse them: `/health` = liveness, `/graph/stats` = readiness (readiness must wait out the ~6–10s graph build, so set a generous `initialDelaySeconds`).
+- Probes: `/health` = liveness; **`/ready`** = readiness + startup (added in C4, `main.py`). `/ready` returns 503 until BOTH the Jaccard graph and TF-IDF index are built, 200 after — a real gate. (`/graph/stats` is NOT valid for readiness: it returns 200 even when unbuilt.) A startupProbe on `/ready` (~150s budget) wins out the slow build before liveness/readiness engage.
 - Images are built and pushed by CI to **GHCR** (`ghcr.io`); minikube pulls from there. CI cannot deploy into a laptop minikube — `kubectl apply` stays manual unless a self-hosted runner is added.
 - Public edge: **Vercel** hosts the SPA (it cannot host the stateful backend/worker/broker — wrong runtime model); the minikube ingress is exposed via a **Cloudflare Tunnel**. Supabase stays managed/external.
 - See `FLAVOUR4.md` for the full PDP and cycle plan.
@@ -157,6 +157,6 @@ Deployment was the optional tail of Flavour 3; it is now its own flavour, broken
 | 1 | Deployment Research — free-tier hosting decision (frontend / stateful k8s backend / registry) | Not started |
 | 2 | Containerization — one shared image (api+worker) + docker-compose; `VITE_API_URL` / `ALLOWED_ORIGINS` env config | Complete (see `FLAVOUR4_CYCLES.md`) |
 | 3 | CI/CD — GitHub Actions: ruff lint + pytest + build/push shared image to GHCR | Built — pending first green run on GitHub |
-| 4 | Kubernetes — minikube: deployments/service/ingress, ConfigMap+Secret, `/health` + `/graph/stats` probes | Not started |
+| 4 | Kubernetes — minikube: deployments/service/ingress, ConfigMap+Secret, `/health` liveness + new `/ready` readiness/startup probes, `up.ps1` bring-up | Complete (see `FLAVOUR4_CYCLE4.md`) |
 | 5 | Public Deployment — Vercel frontend + Cloudflare Tunnel to minikube ingress, end-to-end public smoke test | Not started |
 | 6 (optional) | Autoscaling — KEDA/HPA worker scaling on RabbitMQ queue depth | Not started |

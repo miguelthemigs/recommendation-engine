@@ -1,0 +1,6 @@
+# All rec-engine workloads live in their own namespace for clean teardown
+# (`kubectl delete ns rec-engine` removes everything) and scoped RBAC/quotas.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rec-engine

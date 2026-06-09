@@ -1,0 +1,70 @@
+# API deployment — the shared rec-engine image run as uvicorn (the image's default CMD).
+# Single replica: Cycle 5 identified the single uvicorn process as the next bottleneck,
+# but horizontal scaling is out of scope here.
+#
+# Probe design for a slow (~30-60s) boot:
+#   startupProbe   → /ready, gives ~150s for store.load + graph + tfidf build before
+#                    liveness/readiness even begin (clean modern alternative to a huge
+#                    initialDelaySeconds).
+#   livenessProbe  → /health  (process up + store loaded; restart if it dies).
+#   readinessProbe → /ready   (pod joins the Service only once both indexes are built).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: rec-engine
+  labels:
+    app: api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/miguelthemigs/recommendation-engine:latest
+          # IfNotPresent: prefer an image loaded into minikube (`minikube image load`),
+          # falling back to a one-time GHCR pull when absent. Use Always only if you
+          # want every restart to re-pull :latest from GHCR.
+          imagePullPolicy: IfNotPresent
+          ports:
+            - { name: http, containerPort: 8000 }
+          envFrom:
+            - configMapRef: { name: rec-engine-config }
+            - secretRef:    { name: rec-engine-secrets }
+          startupProbe:
+            httpGet: { path: /ready, port: 8000 }
+            periodSeconds: 5
+            failureThreshold: 30   # 30 × 5s = ~150s budget for the build
+          livenessProbe:
+            httpGet: { path: /health, port: 8000 }
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /ready, port: 8000 }
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests: { memory: "256Mi", cpu: "100m" }
+            limits:   { memory: "768Mi", cpu: "750m" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: rec-engine
+  labels:
+    app: api
+spec:
+  type: ClusterIP
+  selector:
+    app: api
+  ports:
+    - { name: http, port: 8000, targetPort: 8000 }

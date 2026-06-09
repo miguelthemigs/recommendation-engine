@@ -1,5 +1,6 @@
 .env
 frontend/.env
+k8s/*.local.yaml
 data/
 __pycache__/
 *.pyc

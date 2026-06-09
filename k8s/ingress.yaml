@@ -1,0 +1,24 @@
+# Ingress — exposes the API Service at http://rec-engine.local via the minikube
+# ingress addon (nginx). Map rec-engine.local → `minikube ip` in your hosts file
+# (up.ps1 does this automatically).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: rec-engine
+  namespace: rec-engine
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: rec-engine.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 8000

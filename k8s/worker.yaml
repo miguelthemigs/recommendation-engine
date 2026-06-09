@@ -1,0 +1,54 @@
+# Worker deployment — the SAME shared image, command overridden to run the RabbitMQ
+# consumer instead of uvicorn. Runs the same heavy bootstrap as the API
+# (worker.py _bootstrap: store.load + graph.build + tfidf.build), then blocks on the queue.
+#
+# No Service (it serves no HTTP) and no readiness probe. Liveness is a lightweight
+# process check — the slim image has no pgrep, so we ask Python's /proc for a live
+# `python worker.py` process.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: rec-engine
+  labels:
+    app: worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: worker
+  template:
+    metadata:
+      labels:
+        app: worker
+    spec:
+      containers:
+        - name: worker
+          image: ghcr.io/miguelthemigs/recommendation-engine:latest
+          # See api.yaml note — prefer locally-loaded image, fall back to GHCR pull.
+          imagePullPolicy: IfNotPresent
+          command: ["python", "worker.py"]
+          envFrom:
+            - configMapRef: { name: rec-engine-config }
+            - secretRef:    { name: rec-engine-secrets }
+          livenessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - |
+                  import pathlib, sys
+                  for p in pathlib.Path('/proc').iterdir():
+                      try:
+                          if b'worker.py' in (p / 'cmdline').read_bytes():
+                              sys.exit(0)
+                      except Exception:
+                          pass
+                  sys.exit(1)
+            initialDelaySeconds: 90   # cover the bootstrap before checking
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests: { memory: "256Mi", cpu: "100m" }
+            limits:   { memory: "768Mi", cpu: "750m" }

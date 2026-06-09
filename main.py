@@ -13,7 +13,7 @@ Then visit: http://localhost:8000/docs
 """
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from config import ALLOWED_ORIGINS
 from core.store import store
@@ -58,9 +58,29 @@ app.include_router(router)
 
 @app.get("/health", tags=["meta"])
 def health():
+    """Liveness probe — the process is up and the store is loaded."""
     s = store.stats()
     return {
         "status":        "ok",
         "movies_loaded": s["total_movies"],
         "shows_loaded":  s["total_shows"],
     }
+
+
+@app.get("/ready", tags=["meta"])
+def ready(response: Response):
+    """
+    Readiness probe — returns 200 only once BOTH the Jaccard graph and the
+    TF-IDF index have finished building (the ~30-60s startup work). Until then
+    returns 503 so k8s keeps the pod out of the Service. Unlike /graph/stats
+    (which returns 200 even when "not built"), this is a real readiness gate.
+    """
+    from core.graph import graph
+    from core.tfidf import tfidf_index
+
+    g = graph.stats()
+    t = tfidf_index.stats()
+    ok = g.get("status") == "ready" and t.get("status") == "ready"
+    if not ok:
+        response.status_code = 503
+    return {"ready": ok, "jaccard": g, "tfidf": t}
