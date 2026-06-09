@@ -184,6 +184,41 @@ k9s -n rec-engine
 kubectl -n rec-engine rollout restart deployment/api deployment/worker
 ```
 
+## Updating to a new image (after a code change)
+
+Rebuild the image into minikube's daemon, then roll the deployments onto it. Easiest:
+just re-run `up.ps1` (it does both). Manually:
+```powershell
+# 1. Build the new code into minikube's docker
+& minikube -p minikube docker-env --shell powershell | Invoke-Expression
+docker build -t ghcr.io/miguelthemigs/recommendation-engine:latest .
+& minikube -p minikube docker-env --unset --shell powershell | Invoke-Expression
+
+# 2. Roll api + worker onto the fresh image (graceful: new pod up, then old terminates)
+kubectl -n rec-engine rollout restart deployment/api deployment/worker
+kubectl -n rec-engine rollout status deployment/api
+
+# Roll back if the new build misbehaves
+kubectl -n rec-engine rollout undo deployment/api
+```
+Works because `imagePullPolicy: IfNotPresent` + the `:latest` tag uses whatever that tag
+points to *inside minikube* — now your fresh build. Only `api`/`worker` run code;
+RabbitMQ is untouched.
+
+## Scaling (load balancing + worker throughput)
+
+Two independent dials, both at `replicas: 1` by default:
+```powershell
+# More API pods — the Service + ingress load-balance requests across them
+kubectl -n rec-engine scale deployment/api --replicas=3
+
+# More workers — RabbitMQ splits queued cold-start jobs across them (competing consumers)
+kubectl -n rec-engine scale deployment/worker --replicas=3
+```
+The `api` Service load-balances across however many API pods exist (with 1 replica there's
+nothing to balance). Workers don't use the Service — RabbitMQ itself distributes jobs, one
+per available worker. Scale `api` for incoming traffic, `worker` for background throughput.
+
 ## Stopping / tearing down
 
 ```powershell

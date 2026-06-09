@@ -66,9 +66,11 @@ recommendations are synchronous.
 | `VITE_SUPABASE_URL` | Supabase project URL |
 | `VITE_SUPABASE_ANON_KEY` | Public anon key |
 
-> Note (Flavour 4): the frontend API base URL is currently hardcoded to `http://localhost:8000`
-> in `frontend/src/api/client.ts`, and backend CORS is hardcoded in `main.py`. Cycle 2 of
-> Flavour 4 turns these into `VITE_API_URL` / `ALLOWED_ORIGINS`.
+| `VITE_API_URL` | Backend API base URL (defaults to `http://localhost:8000`) |
+
+> Flavour 4 note (done): the frontend API base URL reads `VITE_API_URL`
+> (`frontend/src/api/client.ts`) and backend CORS reads `ALLOWED_ORIGINS` (`config.py`),
+> so both are env-driven — no hardcoded hosts.
 
 ---
 
@@ -137,6 +139,7 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 | search | GET | `/search?q=...&type=movie\|show\|all` | Title search |
 | meta | GET | `/stats` | Dataset stats |
 | meta | GET | `/health` | Health check (liveness probe) |
+| meta | GET | `/ready` | Readiness/startup probe — `503` until graph + TF-IDF are built, `200` after |
 | recommendations | GET | `/recommend/{id}` | Top-K for one item |
 | recommendations | POST | `/recommend/watchlist` | Top-K for a watchlist |
 | recommendations | POST | `/recommend/coldstart` | Enqueue an async cold-start job → returns `job_id` |
@@ -144,7 +147,7 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 | jobs | GET | `/jobs/{job_id}` | Poll a cold-start job result |
 | compare | GET | `/recommend/compare/{id}` | Jaccard vs TF-IDF, with overlap |
 | compare | POST | `/recommend/watchlist/compare` | direct vs BFS vs PageRank, with overlap |
-| graph | GET | `/graph/stats` | Graph build stats (readiness probe) |
+| graph | GET | `/graph/stats` | Graph build stats (returns `200` even when unbuilt — use `/ready` for readiness) |
 
 Auth: watchlist and cold-start routes require a Supabase JWT (`Authorization: Bearer …`).
 Recommendation routes accept an explicit `tmdb_ids` body or fall back to the user's stored watchlist.
@@ -189,10 +192,18 @@ Supabase (managed Postgres + Auth)  <── api + worker
 GHCR (ghcr.io)  ──images──>  pulled by minikube ; GitHub Actions builds + pushes on main
 ```
 
-- **C2 Containerization** — `Dockerfile` (api) + `Dockerfile.worker`, `docker-compose.yml` for the local stack
-- **C3 CI/CD** — `.github/workflows/ci.yml`: lint + test + build + push images to GHCR
-- **C4 Kubernetes** — `k8s/` manifests for minikube (deployments, service, ingress, ConfigMap, Secret, probes)
-- **C5 Public** — Vercel frontend + Cloudflare Tunnel to the minikube ingress
+- **C2 Containerization** ✅ — one shared `Dockerfile` run two ways (api / worker), `docker-compose.yml` for the local stack
+- **C3 CI/CD** 🟡 — `.github/workflows/ci.yml`: lint + test + build + push the shared image to GHCR (pending first green run)
+- **C4 Kubernetes** ✅ — `k8s/` manifests for minikube (deployments, service, ingress, ConfigMap, Secret, `/health` + `/ready` probes). One-command bring-up via `up.ps1`; runbook in `k8s/README.md`; report in `FLAVOUR4_CYCLE4.md`
+- **C5 Public** 🔲 — Vercel frontend + Cloudflare Tunnel to the minikube ingress
+
+### Run the backend on minikube
+```powershell
+# Admin PowerShell, from the repo root — starts the cluster, builds the image,
+# deploys everything, and opens a bridge to http://rec-engine.local/docs
+powershell -ExecutionPolicy Bypass -File .\up.ps1
+```
+Full setup/run/scaling/troubleshooting guide: `k8s/README.md`.
 
 See `FLAVOUR4.md` for the full plan.
 
@@ -209,11 +220,16 @@ rec-engine/
 ├── supabase/       # schema + profiles/roles migrations
 ├── frontend/       # Vite + React + Tailwind SPA
 ├── data/           # JSON cache (git-ignored)
-├── main.py         # FastAPI app + lifespan (load + build)
+├── k8s/            # Kubernetes manifests for minikube + runbook (README.md)
+├── up.ps1          # one-command minikube bring-up (build → deploy → bridge)
+├── Dockerfile      # one shared image, run as api or worker
+├── docker-compose.yml  # local api + worker + rabbitmq stack
+├── main.py         # FastAPI app + lifespan (load + build); /health + /ready
 ├── worker.py       # RabbitMQ consumer for cold-start jobs
 ├── config.py       # all constants / env loading
 ├── CYCLE5.md       # Flavour 3 load-testing report
-└── FLAVOUR4.md     # Flavour 4 deployment PDP
+├── FLAVOUR4.md     # Flavour 4 deployment PDP
+└── FLAVOUR4_CYCLE4.md  # Cycle 4 (Kubernetes) report
 ```
 
 See `CLAUDE.md` for the full architecture reference and engineering rules.
