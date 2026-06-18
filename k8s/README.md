@@ -2,7 +2,8 @@
 
 This deploys the backend (API + worker + RabbitMQ broker) into a local minikube
 cluster. The frontend is **not** here — it runs locally (`cd frontend && npm run dev`)
-or on Vercel (Cycle 5). Supabase is managed/external.
+or on Vercel (see [Public access](#public-access--vercel--cloudflare-quick-tunnel) below).
+Supabase is managed/external.
 
 There are two phases:
 
@@ -274,7 +275,7 @@ minikube ip      # note the new IP, edit C:\Windows\System32\drivers\etc\hosts
 
 ---
 
-## Public access (Cycle 5) — Vercel + Cloudflare quick tunnel
+## Public access — Vercel + Cloudflare quick tunnel
 
 The frontend runs on **Vercel**; the minikube ingress is exposed publicly by an
 **in-cluster cloudflared quick tunnel** (`k8s/cloudflared.yaml`). The tunnel is

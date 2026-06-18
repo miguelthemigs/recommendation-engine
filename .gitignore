@@ -10,3 +10,7 @@ node_modules/
 .env*
 
 frontend/dist/
+
+# School / process docs — kept locally, not part of the product repo
+CYCLE*.md
+FLAVOUR*.md

@@ -8,8 +8,9 @@ job processing.
 - **Frontend:** React 18 · TypeScript · Vite · Tailwind · React Router · Supabase JS
 - **Storage:** Supabase Postgres (primary), local JSON cache fallback. All reads served from RAM after startup.
 
-> Built across "Flavours" for Semester 6. Flavour 3 (scalable architecture) is complete — see
-> `CYCLE5.md`. Flavour 4 (deployment & DevOps) is the current focus — see `FLAVOUR4.md`.
+> Runs end to end and is deployed **public over HTTPS** — the SPA on Vercel, the
+> containerized backend on Kubernetes, exposed through a Cloudflare tunnel, with CI building
+> and publishing images on every push. See `CLAUDE.md` for the full architecture reference.
 
 ---
 
@@ -65,12 +66,11 @@ recommendations are synchronous.
 |---|---|
 | `VITE_SUPABASE_URL` | Supabase project URL |
 | `VITE_SUPABASE_ANON_KEY` | Public anon key |
-
 | `VITE_API_URL` | Backend API base URL (defaults to `http://localhost:8000`) |
 
-> Flavour 4 note (done): the frontend API base URL reads `VITE_API_URL`
-> (`frontend/src/api/client.ts`) and backend CORS reads `ALLOWED_ORIGINS` (`config.py`),
-> so both are env-driven — no hardcoded hosts.
+> All config is env-driven — the frontend API base URL reads `VITE_API_URL`
+> (`frontend/src/api/client.ts`) and backend CORS reads `ALLOWED_ORIGINS` /
+> `ALLOWED_ORIGIN_REGEX` (`config.py`). No hardcoded hosts.
 
 ---
 
@@ -121,8 +121,8 @@ python worker.py
 cd frontend && npm install && npm run dev   # http://localhost:5173
 ```
 
-> Flavour 4 replaces this multi-terminal dance with `docker compose up` (Cycle 2) and then a
-> Kubernetes deployment (Cycle 4). See `FLAVOUR4.md`.
+> Or bring the whole local stack up with one command: `docker compose up`. For the
+> Kubernetes deployment, see [Deployment](#deployment) below.
 
 ---
 
@@ -169,9 +169,10 @@ Recommendation routes accept an explicit `tmdb_ids` body or fall back to the use
 
 ## Load testing
 
-k6 load tests live in `tests/load/` with their own runbook (`tests/load/README.md`). Headline
-Cycle 5 result: submit p95 stayed under 250 ms across all worker counts; end-to-end p95 dropped
-51 s → 15 s going from 1 to 3 workers (near-linear). Full report in `CYCLE5.md`.
+k6 load tests live in `tests/load/` with their own runbook (`tests/load/README.md`).
+Measured characteristics: cold-start submit p95 stays under 250 ms across worker counts (the
+API never blocks on the LLM), and end-to-end p95 drops from ~51 s to ~15 s scaling workers
+from 1 to 3 (near-linear).
 
 ```powershell
 ./tests/load/run_load_test.ps1 -Workers 3
@@ -179,33 +180,31 @@ Cycle 5 result: submit p95 stayed under 250 ms across all worker counts; end-to-
 
 ---
 
-## Deployment (Flavour 4 — in progress)
+## Deployment
 
-The deployment target is fully free-tier:
+The app is deployed on a fully free-tier stack, public over HTTPS:
 
 ```
-Vercel SPA  ──HTTPS──>  Cloudflare Tunnel  ──>  minikube ingress (local)
+Vercel SPA  ──HTTPS──>  Cloudflare Tunnel  ──>  Kubernetes ingress (minikube)
    (frontend)                                      ├─ api (FastAPI)
                                                     ├─ worker
                                                     └─ rabbitmq
 Supabase (managed Postgres + Auth)  <── api + worker
-GHCR (ghcr.io)  ──images──>  pulled by minikube ; GitHub Actions builds + pushes on main
+GHCR (ghcr.io)  ──images──>  pulled by the cluster ; GitHub Actions builds + pushes on main
 ```
 
-- **C2 Containerization** ✅ — one shared `Dockerfile` run two ways (api / worker), `docker-compose.yml` for the local stack
-- **C3 CI/CD** 🟡 — `.github/workflows/ci.yml`: lint + test + build + push the shared image to GHCR (pending first green run)
-- **C4 Kubernetes** ✅ — `k8s/` manifests for minikube (deployments, service, ingress, ConfigMap, Secret, `/health` + `/ready` probes). One-command bring-up via `up.ps1`; runbook in `k8s/README.md`; report in `FLAVOUR4_CYCLE4.md`
-- **C5 Public** 🔲 — Vercel frontend + Cloudflare Tunnel to the minikube ingress
+- **Containers** — one shared `Dockerfile` run two ways (api / worker); `docker-compose.yml` for the local stack.
+- **CI/CD** — `.github/workflows/ci.yml`: lint + test + build + push the shared image to GHCR on every push to `main`.
+- **Kubernetes** — `k8s/` manifests (deployments, service, ingress, ConfigMap, Secret, `/health` liveness + `/ready` readiness/startup probes). One-command bring-up via `up.ps1`.
+- **Public edge** — the SPA on Vercel (`VITE_API_URL` injected at build time); the cluster ingress exposed through an in-cluster Cloudflare tunnel. CORS allows the Vercel origin via `ALLOWED_ORIGIN_REGEX`.
 
-### Run the backend on minikube
+### Run the backend on a local cluster
 ```powershell
 # Admin PowerShell, from the repo root — starts the cluster, builds the image,
-# deploys everything, and opens a bridge to http://rec-engine.local/docs
+# deploys everything (incl. the public tunnel), and prints the public URL.
 powershell -ExecutionPolicy Bypass -File .\up.ps1
 ```
-Full setup/run/scaling/troubleshooting guide: `k8s/README.md`.
-
-See `FLAVOUR4.md` for the full plan.
+Full setup/run/scaling/troubleshooting guide and the public-access runbook: `k8s/README.md`.
 
 ---
 
@@ -220,16 +219,14 @@ rec-engine/
 ├── supabase/       # schema + profiles/roles migrations
 ├── frontend/       # Vite + React + Tailwind SPA
 ├── data/           # JSON cache (git-ignored)
-├── k8s/            # Kubernetes manifests for minikube + runbook (README.md)
-├── up.ps1          # one-command minikube bring-up (build → deploy → bridge)
+├── k8s/            # Kubernetes manifests (incl. cloudflared tunnel) + runbook (README.md)
+├── up.ps1          # one-command cluster bring-up (build → deploy → public URL)
+├── tunnel-url.ps1  # read the public tunnel URL; -UpdateVercel re-points VITE_API_URL
 ├── Dockerfile      # one shared image, run as api or worker
 ├── docker-compose.yml  # local api + worker + rabbitmq stack
 ├── main.py         # FastAPI app + lifespan (load + build); /health + /ready
 ├── worker.py       # RabbitMQ consumer for cold-start jobs
-├── config.py       # all constants / env loading
-├── CYCLE5.md       # Flavour 3 load-testing report
-├── FLAVOUR4.md     # Flavour 4 deployment PDP
-└── FLAVOUR4_CYCLE4.md  # Cycle 4 (Kubernetes) report
+└── config.py       # all constants / env loading
 ```
 
 See `CLAUDE.md` for the full architecture reference and engineering rules.
