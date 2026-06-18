@@ -1,0 +1,57 @@
+# cloudflared — exposes the in-cluster nginx ingress on a public HTTPS URL via a
+# TryCloudflare *quick tunnel* (anonymous, no account, no Secret). It makes only
+# OUTBOUND connections to Cloudflare's edge, so no `minikube tunnel` / inbound
+# port-forward is needed for public reachability.
+#
+# Tradeoff (Cycle 5 decision): a quick tunnel mints a FRESH https://<x>.trycloudflare.com
+# hostname on every pod start. That's why this is replicas: 1 (each replica would
+# mint its own URL) and why VITE_API_URL on Vercel must be re-pointed per session
+# (see tunnel-url.ps1 -UpdateVercel). A named tunnel would be stable but needs a
+# Cloudflare account + a Secret — out of scope (no domain owned).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflared
+  namespace: rec-engine
+  labels:
+    app: cloudflared
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cloudflared
+  template:
+    metadata:
+      labels:
+        app: cloudflared
+    spec:
+      containers:
+        - name: cloudflared
+          image: cloudflare/cloudflared:2026.6.0
+          args:
+            - tunnel
+            - --no-autoupdate
+            # Point at the cluster's nginx ingress controller by its Service DNS.
+            - --url
+            - http://ingress-nginx-controller.ingress-nginx.svc.cluster.local:80
+            # The ingress routes by Host; the tunnel's outbound host header is the
+            # trycloudflare hostname, so rewrite it to the rule's host (ingress.yaml).
+            - --http-host-header
+            - rec-engine.local
+            # Metrics + /ready + /quicktunnel (assigned hostname as JSON) live here.
+            - --metrics
+            - 0.0.0.0:2000
+            # QUIC (UDP 7844) is often filtered on school/corp networks; http2 over
+            # 443 is the reliable fallback. Drop this line if QUIC works for you.
+            - --protocol
+            - http2
+          ports:
+            - { name: metrics, containerPort: 2000 }
+          readinessProbe:
+            httpGet: { path: /ready, port: 2000 }
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests: { memory: "32Mi", cpu: "20m" }
+            limits:   { memory: "128Mi", cpu: "200m" }

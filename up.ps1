@@ -73,6 +73,10 @@ kubectl apply -f k8s/rabbitmq.yaml
 kubectl apply -f k8s/api.yaml
 kubectl apply -f k8s/worker.yaml
 kubectl apply -f k8s/ingress.yaml
+# cloudflared exposes the ingress on a public https://<x>.trycloudflare.com URL
+# (Cycle 5). Outbound-only, so it needs no inbound port-forward — the bridge in
+# step 8 below is for LOCAL access only.
+kubectl apply -f k8s/cloudflared.yaml
 # If pods already existed (re-run), force them onto the freshly built image.
 kubectl -n $NS rollout restart deployment/api deployment/worker | Out-Null
 
@@ -85,6 +89,8 @@ Step "Waiting for API (0/1 while it builds — expected)"
 kubectl -n $NS rollout status deployment/api --timeout=240s
 Step "Waiting for worker"
 kubectl -n $NS rollout status deployment/worker --timeout=240s
+Step "Waiting for cloudflared (public tunnel)"
+kubectl -n $NS rollout status deployment/cloudflared --timeout=120s
 
 # ── 7. Hosts entry → 127.0.0.1 ──────────────────────────────────────────────
 # Windows + docker driver: `minikube ip` is NOT routable from the host, so the
@@ -101,6 +107,28 @@ if (-not $line) {
 }
 
 kubectl -n $NS get pods
+
+# ── 7b. Public tunnel URL (Cycle 5) ─────────────────────────────────────────
+# Pull the fresh trycloudflare URL out of the cloudflared logs and remind the
+# user to push it to Vercel. This is the per-session "rotating URL" dance.
+Step "Fetching the public tunnel URL"
+$tunnel = $null
+for ($i = 0; $i -lt 30; $i++) {
+    $logs = kubectl -n $NS logs deploy/cloudflared --tail=200 2>$null
+    if ($logs) {
+        $m = [regex]::Match(($logs -join "`n"), 'https://[a-z0-9-]+\.trycloudflare\.com')
+        if ($m.Success) { $tunnel = $m.Value; break }
+    }
+    Start-Sleep -Seconds 2
+}
+Write-Host "`n────────────────────────────────────────────────────────────" -ForegroundColor Magenta
+if ($tunnel) {
+    Write-Host " PUBLIC URL:  $tunnel" -ForegroundColor Magenta
+    Write-Host " Push it to Vercel:  .\tunnel-url.ps1 -UpdateVercel" -ForegroundColor White
+} else {
+    Write-Host " Tunnel URL not in logs yet. Check:  kubectl -n $NS logs deploy/cloudflared" -ForegroundColor Yellow
+}
+Write-Host "────────────────────────────────────────────────────────────" -ForegroundColor Magenta
 
 # ── 8. Open the bridge (stays running) ──────────────────────────────────────
 Write-Host "`n────────────────────────────────────────────────────────────" -ForegroundColor Green
