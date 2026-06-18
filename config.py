@@ -31,6 +31,12 @@ ALLOWED_ORIGINS = [
     if origin.strip()
 ]
 
+# Optional regex matched in ADDITION to ALLOWED_ORIGINS. Needed for hosts whose
+# subdomain can't be enumerated up front — Vercel mints rotating deploy/preview
+# subdomains (and gives no clean alias on the hobby tier), so we match the whole
+# project family by pattern. Empty string → feature unused.
+ALLOWED_ORIGIN_REGEX = os.getenv("ALLOWED_ORIGIN_REGEX", "") or None
+
 # ── TMDB ───────────────────────────────────────────────────────────────────────
 TMDB_API_KEY  = os.getenv("TMDB_API_KEY", "")
 TMDB_BASE_URL = "https://api.themoviedb.org/3"

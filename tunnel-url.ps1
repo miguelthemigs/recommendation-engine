@@ -1,10 +1,10 @@
 <#
-  tunnel-url.ps1 — get (and optionally push) the current TryCloudflare quick-tunnel URL.
+  tunnel-url.ps1 - get (and optionally push) the current TryCloudflare quick-tunnel URL.
 
   The quick tunnel mints a fresh https://<x>.trycloudflare.com hostname every time the
   cloudflared pod (re)starts. This script reads that URL out of the pod logs.
 
-  Usage (from repo root, normal — NOT admin — PowerShell is fine):
+  Usage (from repo root, normal - NOT admin - PowerShell is fine):
 
       .\tunnel-url.ps1                 # just print the current public URL
       .\tunnel-url.ps1 -UpdateVercel   # also re-point Vercel's VITE_API_URL + redeploy prod
@@ -34,8 +34,7 @@ for ($i = 0; $i -lt 30; $i++) {
 }
 
 if (-not $url) {
-    throw "No trycloudflare.com URL found in cloudflared logs. Is the pod Running? `n" +
-          "Check:  kubectl -n $NS logs deploy/cloudflared"
+    throw "No trycloudflare.com URL found in cloudflared logs. Is the pod Running? `nCheck:  kubectl -n $NS logs deploy/cloudflared"
 }
 
 Write-Host "`n  Public tunnel URL:  $url" -ForegroundColor Green
@@ -46,7 +45,7 @@ if (-not $UpdateVercel) {
     return
 }
 
-# ── Push to Vercel ───────────────────────────────────────────────────────────
+# -- Push to Vercel ----------------------------------------------------------
 # VITE_ vars are baked at BUILD time, so changing the env requires a fresh prod build.
 $frontend = Join-Path $PSScriptRoot "frontend"
 Push-Location $frontend

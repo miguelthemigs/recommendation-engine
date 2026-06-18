@@ -9,8 +9,13 @@ metadata:
 data:
   # In-cluster broker address — reach RabbitMQ by its Service DNS name, not localhost.
   RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672/"
-  # CORS — local dev frontend + the ingress host. Cycle 5 adds the Vercel origin.
+  # CORS — exact origins for local dev + the ingress host.
   ALLOWED_ORIGINS: "http://localhost:5173,http://rec-engine.local"
+  # Cycle 5: Vercel mints rotating deploy/preview subdomains (no clean alias on the
+  # hobby tier), so match the whole project family by regex instead of listing each.
+  # Covers e.g. recommendation-engine-git-main-miguel-5889s-projects.vercel.app and
+  # the per-deploy hash URLs. Tighten if the project is ever renamed.
+  ALLOWED_ORIGIN_REGEX: 'https://recommendation-engine[a-z0-9-]*\.vercel\.app'
   # Honest end-to-end: real OpenAI (Supabase is live), no canned signals.
   MOCK_OPENAI: "false"
   MOCK_OPENAI_DELAY_MS: "2000"

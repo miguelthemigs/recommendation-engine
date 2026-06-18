@@ -6,3 +6,7 @@ __pycache__/
 *.pyc
 CLAUDE.md
 node_modules/
+.vercel
+.env*
+
+frontend/dist/

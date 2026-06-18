@@ -29,8 +29,6 @@ export function StatsPage() {
   if (error) return <ErrorMessage message={error} />;
   if (!stats || !graphStats) return null;
 
-  const allGenres = { ...stats.movie_genres, ...stats.show_genres };
-
   return (
     <div className="space-y-8">
       <h1 className="text-xl font-bold text-text-primary">Dataset Stats</h1>
