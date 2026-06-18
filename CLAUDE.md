@@ -53,11 +53,14 @@ rec-engine/
 ├── .dockerignore                ← (Flavour 4 C2) small, secret-free build context ✅
 ├── docker-compose.yml           ← (Flavour 4 C2) api + worker + rabbitmq local stack ✅
 ├── .env.example / frontend/.env.example ← (Flavour 4 C2) tracked env templates ✅
-├── .github/workflows/ci.yml     ← (Flavour 4 C3) CI: ruff lint + pytest + build/push GHCR 🟡
+├── .github/workflows/ci.yml     ← (Flavour 4 C3) CI: ruff lint + pytest + build/push GHCR ✅
 ├── tests/unit/                  ← (Flavour 4 C3) hermetic pytest suite (21 tests, no I/O) ✅
 ├── pyproject.toml               ← (Flavour 4 C3) ruff + pytest config (tooling only) ✅
 ├── requirements-dev.txt         ← (Flavour 4 C3) CI-only pytest + ruff (not in runtime image) ✅
-├── k8s/                         ← (Flavour 4 C4) minikube manifests + README runbook ✅
+├── k8s/                         ← (Flavour 4 C4/C5) minikube manifests (incl. cloudflared.yaml) + README runbook ✅
+├── frontend/vercel.json         ← (Flavour 4 C5) SPA rewrites so React Router deep links don't 404 ✅
+├── tunnel-url.ps1               ← (Flavour 4 C5) read rotating tunnel URL; -UpdateVercel re-points VITE_API_URL ✅
+├── FLAVOUR4_CYCLE5.md           ← (Flavour 4 C5) public deployment report ✅
 └── .env                         ← SUPABASE/RABBITMQ/OPENAI + load-test creds
 ```
 
@@ -122,14 +125,16 @@ rec-engine/
 - k6 binary is portable at `C:\tools\k6\k6-v0.50.0-windows-amd64\k6.exe`.
 - Re-running the sweep: `./tests/load/run_load_test.ps1 -Workers N` (or run the steps inline; see `tests/load/README.md`).
 
-**Deployment (Flavour 4 — target shape, mostly not built yet)**
+**Deployment (Flavour 4 — built through Cycle 5; public over HTTPS)**
 - Two runtime images, one codebase: API (`main.py`) and worker (`worker.py`) ship as separate images but share the same heavy bootstrap (`store.load` + `graph.build` + `tfidf.build`). Build once, run as two deployments.
-- Config is env-driven, never baked in. The two C2 blockers are now fixed: frontend API URL reads `VITE_API_URL` (`frontend/src/api/client.ts`); backend CORS reads `ALLOWED_ORIGINS` (`config.py` → `main.py`). No new hardcoded hosts.
+- Config is env-driven, never baked in. The two C2 blockers are fixed: frontend API URL reads `VITE_API_URL` (`frontend/src/api/client.ts`); backend CORS reads `ALLOWED_ORIGINS` (`config.py` → `main.py`). No hardcoded hosts.
+- **CORS (C5):** `ALLOWED_ORIGIN_REGEX` (`config.py` → `main.py`, set in `k8s/configmap.yaml`) matches Vercel's rotating `*.vercel.app` subdomains in addition to the exact local origins — Vercel hobby tier gives no clean alias, so a regex beats an unmaintainable list. Verified to reject look-alike spoofs.
 - Secrets (Supabase keys, OpenAI key) live in a k8s `Secret`, never in an image or committed manifest. Non-secret config in a `ConfigMap`.
-- Probes: `/health` = liveness; **`/ready`** = readiness + startup (added in C4, `main.py`). `/ready` returns 503 until BOTH the Jaccard graph and TF-IDF index are built, 200 after — a real gate. (`/graph/stats` is NOT valid for readiness: it returns 200 even when unbuilt.) A startupProbe on `/ready` (~150s budget) wins out the slow build before liveness/readiness engage.
+- Probes: `/health` = liveness; **`/ready`** = readiness + startup (added in C4, `main.py`). `/ready` returns 503 until BOTH the Jaccard graph and TF-IDF index are built, 200 after — a real gate. (`/graph/stats` is NOT valid for readiness: it returns 200 even when unbuilt.) A startupProbe on `/ready` (~150s budget) waits out the slow build before liveness/readiness engage.
 - Images are built and pushed by CI to **GHCR** (`ghcr.io`); minikube pulls from there. CI cannot deploy into a laptop minikube — `kubectl apply` stays manual unless a self-hosted runner is added.
-- Public edge: **Vercel** hosts the SPA (it cannot host the stateful backend/worker/broker — wrong runtime model); the minikube ingress is exposed via a **Cloudflare Tunnel**. Supabase stays managed/external.
-- See `FLAVOUR4.md` for the full PDP and cycle plan.
+- **Public edge (C5):** **Vercel** hosts the SPA (it cannot host the stateful backend/worker/broker — wrong runtime model; Root Directory = `frontend`, Vite preset). The minikube ingress is exposed via an **in-cluster Cloudflare quick tunnel** (`k8s/cloudflared.yaml`) — outbound-only, anonymous (no account/domain), but its `*.trycloudflare.com` URL **rotates on every pod restart**, so `VITE_API_URL` is re-pointed per session (`tunnel-url.ps1 -UpdateVercel`, or manual). Supabase stays managed/external. CORS + Supabase auth URLs are keyed to the stable Vercel origin → set once.
+- **Vercel deploy caveat:** deploy via the **git integration** (push to `main`) or a dashboard redeploy — `vercel --prod` from this mixed repo re-runs framework detection, finds `pyproject.toml`/`main.py`, and flips the project preset to FastAPI. The `-UpdateVercel` script path has this bug pending a fix.
+- See `FLAVOUR4.md` for the PDP and `FLAVOUR4_CYCLE5.md` for the public-deployment report.
 
 ## Comparison endpoints
 - `GET  /recommend/compare/{tmdb_id}` — Jaccard vs TF-IDF, with overlap
@@ -156,7 +161,7 @@ Deployment was the optional tail of Flavour 3; it is now its own flavour, broken
 |---|---|---|
 | 1 | Deployment Research — free-tier hosting decision (frontend / stateful k8s backend / registry) | Not started |
 | 2 | Containerization — one shared image (api+worker) + docker-compose; `VITE_API_URL` / `ALLOWED_ORIGINS` env config | Complete (see `FLAVOUR4_CYCLES.md`) |
-| 3 | CI/CD — GitHub Actions: ruff lint + pytest + build/push shared image to GHCR | Built — pending first green run on GitHub |
+| 3 | CI/CD — GitHub Actions: ruff lint + pytest + build/push shared image to GHCR | Complete (CI green on main) |
 | 4 | Kubernetes — minikube: deployments/service/ingress, ConfigMap+Secret, `/health` liveness + new `/ready` readiness/startup probes, `up.ps1` bring-up | Complete (see `FLAVOUR4_CYCLE4.md`) |
-| 5 | Public Deployment — Vercel frontend + Cloudflare Tunnel to minikube ingress, end-to-end public smoke test | Not started |
+| 5 | Public Deployment — Vercel frontend + in-cluster Cloudflare quick tunnel to minikube ingress, CORS regex, end-to-end public smoke test | Complete (see `FLAVOUR4_CYCLE5.md`) |
 | 6 (optional) | Autoscaling — KEDA/HPA worker scaling on RabbitMQ queue depth | Not started |

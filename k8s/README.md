@@ -258,7 +258,8 @@ Check the logs and the readiness probe:
 kubectl -n rec-engine logs -l app=api
 kubectl -n rec-engine describe pod -l app=api
 ```
-A crash usually means it can't reach Supabase — verify the secret keys.
+A crash usually means it can't reach Supabase — verify the secret keys (and that the
+Supabase project isn't **paused** — free-tier projects sleep after inactivity).
 
 ### The IP changed after `minikube delete`
 `rec-engine.local` points at the old IP. Update the hosts line (admin PowerShell):
@@ -270,3 +271,64 @@ minikube ip      # note the new IP, edit C:\Windows\System32\drivers\etc\hosts
 - All pods `1/1`? (`kubectl -n rec-engine get pods`)
 - Ingress addon enabled? (`minikube addons list | findstr ingress`)
 - Hosts entry present and matching `minikube ip`?
+
+---
+
+## Public access (Cycle 5) — Vercel + Cloudflare quick tunnel
+
+The frontend runs on **Vercel**; the minikube ingress is exposed publicly by an
+**in-cluster cloudflared quick tunnel** (`k8s/cloudflared.yaml`). The tunnel is
+**outbound-only** — no router/firewall changes, and the local `port-forward` bridge above
+is *not* needed for the public path. The tradeoff: a quick tunnel is anonymous and free
+but its `https://<random>.trycloudflare.com` URL **rotates on every cloudflared (re)start**
+(including `minikube stop`/`start`).
+
+### One-time setup
+- **Vercel project** importing this repo: **Root Directory = `frontend`**, **Framework
+  Preset = Vite**. Production env vars: `VITE_API_URL` (set per session, below),
+  `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (from `frontend/.env`).
+- **CORS** — already handled: `k8s/configmap.yaml` sets `ALLOWED_ORIGIN_REGEX` to match the
+  project's `*.vercel.app` domains. No per-session edit.
+- **Supabase → Authentication → URL Configuration** — Site URL + an Additional Redirect URL
+  (`https://<your-project>.vercel.app/**`) pointing at the Vercel domain; keep
+  `http://localhost:5173/**` for local dev.
+- *(Optional)* **Vercel CLI** for scripted env updates: `npm i -g vercel; vercel login;
+  cd frontend; vercel link`.
+
+### Per-session runbook (the rotating-URL dance)
+1. **Admin PowerShell**, repo root — `up.ps1` brings up the tunnel and prints the URL:
+   ```powershell
+   .\up.ps1
+   ```
+   Look for `PUBLIC URL: https://<...>.trycloudflare.com`.
+2. Point Vercel at it and **rebuild** (`VITE_*` is baked at build time):
+   - **Recommended:** set `VITE_API_URL` in the Vercel dashboard, then **Deployments →
+     ⋯ → Redeploy** (uncheck build cache) — or push to `main` to trigger a git deploy.
+   - The script's `.\tunnel-url.ps1 -UpdateVercel` sets the env var but its `vercel --prod`
+     step currently flips the Vercel framework preset to FastAPI (see troubleshooting) —
+     prefer the git/dashboard redeploy until that's fixed.
+3. Verify:
+   ```powershell
+   Invoke-RestMethod https://<...>.trycloudflare.com/ready   # -> ready : True
+   ```
+4. Open the Vercel URL and use the app.
+
+### Public-path troubleshooting
+- **No URL in the cloudflared logs** — the banner appears ~5s after the pod is Running;
+  `kubectl -n rec-engine logs deploy/cloudflared`. The metrics endpoint
+  `:2000/quicktunnel` also returns the assigned hostname.
+- **nginx 404 through the tunnel** — host-header mismatch. cloudflared rewrites the host to
+  `rec-engine.local` (`--http-host-header`) to match the ingress rule; confirm that arg.
+- **Cloudflare error 1033 / tunnel won't establish** — origin unreachable, or QUIC (UDP
+  7844) blocked on the network. The manifest already pins `--protocol http2`; if it still
+  fails, the cluster/ingress may be down.
+- **Vercel build detects "FastAPI" / `No FastAPI entrypoint found`** — the project's
+  Framework Preset got set to FastAPI (Vercel sees `main.py`/`pyproject.toml` at the repo
+  root). Fix: **Settings → Build and Deployment → Framework Preset → Vite**, Root Directory
+  `frontend`. Deploy via git/dashboard, not `vercel --prod`, which re-triggers this.
+- **Vercel build fails `npm run build exited with 2`** — a TypeScript error
+  (`tsc && vite build`); reproduce locally with `cd frontend && npm run build` (it won't
+  show in `vite dev`).
+- **No Supabase confirmation email on public sign-up** — Supabase's built-in email is
+  rate-limited/best-effort. For demos, disable "Confirm email" (Authentication → Sign In /
+  Providers → Email) or wire a custom SMTP provider.
