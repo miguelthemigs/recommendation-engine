@@ -1,0 +1,81 @@
+# Cycle 6 — KEDA autoscaling for the cold-start worker.
+#
+# Scales the `worker` Deployment (k8s/worker.yaml) on the depth of the
+# `coldstart_jobs` RabbitMQ queue: more backlog -> more workers, queue drains ->
+# back down to the warm minimum. Closes the loop on the MANUAL `kubectl scale`
+# measured in Flavour 3 Cycle 5.
+#
+# Requires KEDA installed in the cluster (namespace `keda`) — see up.ps1 /
+# k8s/README.md. Apply AFTER worker.yaml exists (scaleTargetRef must resolve).
+#
+# Trigger reads the queue over AMQP using the SAME URL/creds the worker itself
+# uses (configmap RABBITMQ_URL). No RabbitMQ management plugin call, no
+# metrics-server — the rabbitmq queue-length trigger is an external metric served
+# by KEDA's own metrics-apiserver.
+---
+# Broker URL for KEDA, kept out of the ScaledObject body (mirrors the
+# "secrets live in a Secret, never inline" rule). Mirrors the ConfigMap's
+# RABBITMQ_URL, BUT with a FULLY-QUALIFIED host — this is the one deliberate
+# difference. The KEDA operator runs in the `keda` namespace, so the bare service
+# name `rabbitmq` (which the worker, living in rec-engine, resolves fine) does NOT
+# resolve cross-namespace ("server misbehaving" from CoreDNS). The FQDN
+# `rabbitmq.rec-engine.svc.cluster.local` resolves from anywhere in the cluster.
+# If the broker creds ever change, update this and k8s/configmap.yaml together.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: keda-rabbitmq-auth
+  namespace: rec-engine
+type: Opaque
+stringData:
+  host: "amqp://guest:guest@rabbitmq.rec-engine.svc.cluster.local:5672/"
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: keda-rabbitmq-trigger-auth
+  namespace: rec-engine
+spec:
+  secretTargetRef:
+    - parameter: host
+      name: keda-rabbitmq-auth
+      key: host
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: worker-scaler
+  namespace: rec-engine
+spec:
+  scaleTargetRef:
+    name: worker                 # the Deployment in k8s/worker.yaml
+  # --- The scaling envelope (the LO1 decisions; rationale in FLAVOUR4_CYCLE6.md) ---
+  minReplicaCount: 1             # WARM, not 0. Kept on two grounds: (a) the deployment
+                                 # already ran permanently at replicas:1, so min=1 is the
+                                 # status quo + autoscaling (no regression); (b) a warm worker
+                                 # guarantees the durable coldstart_jobs queue is always
+                                 # declared, so KEDA's read never races a missing queue.
+                                 # (Bootstrap was MEASURED at ~9s pod-to-ready, so scale-to-zero
+                                 # would only cost ~15-20s on the first job, not minutes — a
+                                 # reasonable option declined for the two reasons above.)
+  maxReplicaCount: 5             # single-laptop ceiling; exceeds Cycle 5's manual 3
+                                 # while staying schedulable (5 x 256Mi requests).
+  pollingInterval: 10            # seconds between KEDA queue reads
+  cooldownPeriod: 120            # seconds of empty queue before scaling back to min
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          # Smooth the down-scale so a brief drain between k6 ramp stages doesn't flap.
+          stabilizationWindowSeconds: 120
+  triggers:
+    - type: rabbitmq
+      metadata:
+        protocol: amqp
+        queueName: coldstart_jobs   # MUST equal config.COLDSTART_QUEUE exactly
+        mode: QueueLength           # scale on backlog length, not message rate
+        value: "3"                  # target backlog per worker:
+                                    #   desiredReplicas = ceil(messagesReady / 3),
+                                    #   clamped to [minReplicaCount, maxReplicaCount]
+      authenticationRef:
+        name: keda-rabbitmq-trigger-auth

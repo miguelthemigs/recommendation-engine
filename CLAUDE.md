@@ -61,6 +61,10 @@ rec-engine/
 ├── frontend/vercel.json         ← (Flavour 4 C5) SPA rewrites so React Router deep links don't 404 ✅
 ├── tunnel-url.ps1               ← (Flavour 4 C5) read rotating tunnel URL; -UpdateVercel re-points VITE_API_URL ✅
 ├── FLAVOUR4_CYCLE5.md           ← (Flavour 4 C5) public deployment report ✅
+├── k8s/keda-scaledobject.yaml   ← (Flavour 4 C6) Secret + TriggerAuthentication + ScaledObject: worker autoscales on coldstart_jobs depth ✅
+├── k8s/keda-up.ps1              ← (Flavour 4 C6) opt-in: install pinned KEDA + apply ScaledObject (-Down to remove); separate from up.ps1 ✅
+├── tests/load/replica_monitor.ps1 ← (Flavour 4 C6) samples worker readyReplicas + KEDA HPA → replicas.csv (sibling to queue_monitor.py) ✅
+├── FLAVOUR4_CYCLE6.md           ← (Flavour 4 C6) autoscaling report ✅
 └── .env                         ← SUPABASE/RABBITMQ/OPENAI + load-test creds
 ```
 
@@ -125,7 +129,7 @@ rec-engine/
 - k6 binary is portable at `C:\tools\k6\k6-v0.50.0-windows-amd64\k6.exe`.
 - Re-running the sweep: `./tests/load/run_load_test.ps1 -Workers N` (or run the steps inline; see `tests/load/README.md`).
 
-**Deployment (Flavour 4 — built through Cycle 5; public over HTTPS)**
+**Deployment (Flavour 4 — built through Cycle 6; public over HTTPS, worker autoscaled)**
 - Two runtime images, one codebase: API (`main.py`) and worker (`worker.py`) ship as separate images but share the same heavy bootstrap (`store.load` + `graph.build` + `tfidf.build`). Build once, run as two deployments.
 - Config is env-driven, never baked in. The two C2 blockers are fixed: frontend API URL reads `VITE_API_URL` (`frontend/src/api/client.ts`); backend CORS reads `ALLOWED_ORIGINS` (`config.py` → `main.py`). No hardcoded hosts.
 - **CORS (C5):** `ALLOWED_ORIGIN_REGEX` (`config.py` → `main.py`, set in `k8s/configmap.yaml`) matches Vercel's rotating `*.vercel.app` subdomains in addition to the exact local origins — Vercel hobby tier gives no clean alias, so a regex beats an unmaintainable list. Verified to reject look-alike spoofs.
@@ -134,7 +138,8 @@ rec-engine/
 - Images are built and pushed by CI to **GHCR** (`ghcr.io`); minikube pulls from there. CI cannot deploy into a laptop minikube — `kubectl apply` stays manual unless a self-hosted runner is added.
 - **Public edge (C5):** **Vercel** hosts the SPA (it cannot host the stateful backend/worker/broker — wrong runtime model; Root Directory = `frontend`, Vite preset). The minikube ingress is exposed via an **in-cluster Cloudflare quick tunnel** (`k8s/cloudflared.yaml`) — outbound-only, anonymous (no account/domain), but its `*.trycloudflare.com` URL **rotates on every pod restart**, so `VITE_API_URL` is re-pointed per session (`tunnel-url.ps1 -UpdateVercel`, or manual). Supabase stays managed/external. CORS + Supabase auth URLs are keyed to the stable Vercel origin → set once.
 - **Vercel deploy caveat:** deploy via the **git integration** (push to `main`) or a dashboard redeploy — `vercel --prod` from this mixed repo re-runs framework detection, finds `pyproject.toml`/`main.py`, and flips the project preset to FastAPI. The `-UpdateVercel` script path has this bug pending a fix.
-- See `FLAVOUR4.md` for the PDP and `FLAVOUR4_CYCLE5.md` for the public-deployment report.
+- **Autoscaling (C6):** the **worker** is autoscaled by **KEDA** (`k8s/keda-scaledobject.yaml`) on the depth of the `coldstart_jobs` queue, read over **AMQP** at the FQDN `rabbitmq.rec-engine.svc.cluster.local` (the KEDA operator runs in the `keda` namespace, so the bare `rabbitmq` name doesn't resolve cross-namespace — this bit during the demo) — no metrics-server (the queue-length trigger is an external metric). Envelope: `minReplicaCount: 1` (WARM, not 0 — kept for no-regression vs the prior `replicas: 1` and to guarantee the durable queue is declared; bootstrap was **measured at ~9s** pod-to-ready, so scale-to-zero would cost only ~15–20s on the first job, not minutes), `maxReplicaCount: 5`, target `value: 3` jobs/worker, poll 10s, cooldown 120s. Demo proved it: KEDA stepped the worker `1→4` tracking `ceil(messages_ready/3)` then back to `1` after cooldown, per its own `SuccessfulRescale` events. Autoscaling is **opt-in and decoupled from the everyday bring-up**: `up.ps1` does NOT touch KEDA. A separate `k8s/keda-up.ps1` installs a pinned KEDA (`v2.17.1`) and applies the `ScaledObject` (`-Down` removes both). **Gotcha:** KEDA now owns the worker replica count — a manual `kubectl scale deployment/worker` is reverted within one poll; reclaim via the `autoscaling.keda.sh/paused-replicas` annotation or delete the `ScaledObject`. The `api` dial stays manual. Demo runbook (k6 flood + `queue_monitor.py` + `replica_monitor.ps1`) in `k8s/README.md`.
+- See `FLAVOUR4.md` for the PDP, `FLAVOUR4_CYCLE5.md` for the public-deployment report, and `FLAVOUR4_CYCLE6.md` for the autoscaling report.
 
 ## Comparison endpoints
 - `GET  /recommend/compare/{tmdb_id}` — Jaccard vs TF-IDF, with overlap
@@ -164,4 +169,4 @@ Deployment was the optional tail of Flavour 3; it is now its own flavour, broken
 | 3 | CI/CD — GitHub Actions: ruff lint + pytest + build/push shared image to GHCR | Complete (CI green on main) |
 | 4 | Kubernetes — minikube: deployments/service/ingress, ConfigMap+Secret, `/health` liveness + new `/ready` readiness/startup probes, `up.ps1` bring-up | Complete (see `FLAVOUR4_CYCLE4.md`) |
 | 5 | Public Deployment — Vercel frontend + in-cluster Cloudflare quick tunnel to minikube ingress, CORS regex, end-to-end public smoke test | Complete (see `FLAVOUR4_CYCLE5.md`) |
-| 6 (optional) | Autoscaling — KEDA/HPA worker scaling on RabbitMQ queue depth | Not started |
+| 6 | Autoscaling — KEDA `ScaledObject` autoscales the worker on `coldstart_jobs` queue depth (min 1 warm / max 5), closing the loop on Flavour 3 Cycle 5's manual scaling | Complete (see `FLAVOUR4_CYCLE6.md`) |
